@@ -19,6 +19,7 @@ import sounddevice as sd
 import soundfile as sf
 from io import BytesIO
 import asyncio
+import librosa
 
 from modules.module_piper import text_to_speech_with_pipelining_piper
 from modules.module_silero import text_to_speech_with_pipelining_silero
@@ -62,7 +63,7 @@ def update_tts_settings(ttsurl):
     except Exception as e:
         queue_message(f"ERROR: TTS update failed: {e}")
 
-def play_audio_stream(tts_stream, samplerate=22050, channels=1, gain=1.0, normalize=False):
+def play_audio_stream(tts_stream, samplerate=48000, channels=1, gain=1.0, normalize=False):
     """
     Play the audio stream through speakers using SoundDevice with volume/gain adjustment.
     
@@ -97,7 +98,8 @@ def play_audio_stream(tts_stream, samplerate=22050, channels=1, gain=1.0, normal
         queue_message(f"ERROR: Error during audio playback: {e}")
 
 
-async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=None, ttsurl=None, toggle_charvoice=True, tts_voice=None):
+# async def generate_tts_audio(text, config):
+async def generate_tts_audio(text, config, azure_api_key=None, azure_region=None, ttsurl=None, toggle_charvoice=True, tts_voice=None):
     """
     Generate TTS audio for the given text using the specified TTS system.
 
@@ -108,6 +110,21 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
     - toggle_charvoice (bool): Flag indicating whether to use character voice for TTS.
     - tts_voice (str): The TTS speaker/voice configuration.
     """
+    if hasattr(config, "ttsoption"):
+        # config가 객체인 경우
+        ttsoption = config.ttsoption
+        tts_voice = config.tts_voice
+        ttsurl = config.ttsurl
+        voice_id = config.voice_id
+        model_id = config.model_id
+    else:
+        # 문자열만 넘겨졌을 경우
+        ttsoption = config
+        tts_voice = None
+        ttsurl = None
+        voice_id = None
+        model_id = None
+
     try:
         # Azure TTS generation
         if ttsoption == "azure":
@@ -117,6 +134,7 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
         # Local TTS generation using `espeak-ng`
         elif ttsoption == "espeak":
             async for chunk in text_to_speech_with_pipelining_espeak(text):
+                print(f"chunk type : {type(chunk)}")
                 yield chunk
 
         elif ttsoption == "alltalk":
@@ -154,3 +172,4 @@ async def play_audio_chunks(text, config):
             await asyncio.sleep(len(data) / samplerate)  # Wait for playback to finish
         except Exception as e:
             queue_message(f"ERROR: Failed to play audio chunk: {e}")
+
