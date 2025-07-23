@@ -101,6 +101,7 @@ def utterance_callback(message):
     try:
         # Parse the user message
         message_dict = json.loads(message)
+        print(f"DEBUG: Parsed STT result = {message_dict}")
         if not message_dict.get('text'):  # Handles cases where text is "" or missing
             #queue_message(f"TARS: Going Idle...")
             return
@@ -117,6 +118,7 @@ def utterance_callback(message):
         
         # Process the message using process_completion
         reply = process_completion(message_dict['text'])  # Process the message
+        print(f"DEBUG: Generated reply = {reply}")
 
         # Extract the <think> block if present
         try:
@@ -125,6 +127,7 @@ def utterance_callback(message):
             
             # Remove the <think> block and clean up trailing whitespace/newlines
             reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
+            print(f"DEBUG: Final TTS text = {reply}")
         except Exception:
             thoughts = ""
 
@@ -140,7 +143,10 @@ def utterance_callback(message):
         reply = re.sub(r'[^a-zA-Z0-9\s.,?!;:"\'-]', '', reply)
         
         # Stream TTS audio to speakers
-        asyncio.run(play_audio_chunks(reply, CONFIG['TTS']['ttsoption']))
+        asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
+        
+        if stt_manager.post_utterance_callback:
+            stt_manager.post_utterance_callback()
 
     except json.JSONDecodeError:
         queue_message("ERROR: Invalid JSON format. Could not process user message.")
@@ -153,6 +159,7 @@ def post_utterance_callback():
     """
     global stt_manager
     stt_manager._transcribe_utterance()
+    pass
 
 # === Initialization ===
 def initialize_managers(mem_manager, char_manager, stt_mgr):
