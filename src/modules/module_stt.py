@@ -84,9 +84,19 @@ class STTManager:
         Start the STTManager in a separate thread.
         """
         self.running = True
-        self.thread = threading.Thread(
-            target=self._stt_processing_loop, name="STTThread", daemon=True
-        )
+        #self.thread = threading.Thread(
+        #    target=self._stt_processing_loop, name="STTThread", daemon=True
+        #)
+        #self.thread.start()
+        def run():
+            while self.running:
+                try:
+                    self._stt_processing_loop()
+                except Exception as e:
+                    print(f"[WATCHDOG] STT loop crashed: {e}")
+                    time.sleep(2)  # 재시작 전 잠시 대기
+
+        self.thread = threading.Thread(target=run, name="STTWatchdog", daemon=True)
         self.thread.start()
 
     def stop(self):
@@ -261,6 +271,7 @@ class STTManager:
         """
         try:
             while self.running:
+                print("STT loop running...")
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
@@ -275,41 +286,54 @@ class STTManager:
     def _detect_wake_word(self) -> bool:
         """
         Detect the wake word using Vosk recognizer.
+        Automatically restarts stream every 300 seconds to prevent USB sleep.
         """
+        WAKE_RESTART_INTERVAL = 300  # 5분마다 InputStream 재시작
+        last_restart_time = time.time()
+
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
         print(f"TARS: Sleeping...")
 
-        try:
-            recognizer = KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
-            mic_index = self._get_default_input_device()
+        recognizer = KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
+        mic_index = self._get_default_input_device()
 
-            with sd.InputStream(
-                samplerate=self.SAMPLE_RATE,
-                channels=1,
-                dtype='int16',
-                blocksize=8000,
-                latency='high',
-                device=mic_index
-            ) as stream:
-                while True:
-                    data, _ = stream.read(4000)
-                    if recognizer.AcceptWaveform(data.tobytes()):
-                        result = json.loads(recognizer.Result())
-                        text = result.get("text", "").lower()
-                        print(f"DEBUG: Vosk recognized text: {text}")
-                        if self.WAKE_WORD in text:
-                            if self.config['STT']['use_indicators']:
-                                self.play_beep(1200, 0.1, 44100, 0.8)  # wake tone
-                            wake_response = random.choice(self.TARS_RESPONSES)
-                            print(f"TARS: {wake_response}")
+        while True:
+            try:
+                with sd.InputStream(
+                    samplerate=self.SAMPLE_RATE,
+                    channels=1,
+                    dtype='int16',
+                    blocksize=8000,
+                    latency='high',
+                    device=mic_index
+                ) as stream:
+                    print("InputStream opened successfully")
+                    while True:
+                        # 주기적으로 stream 리셋
+                        if time.time() - last_restart_time > WAKE_RESTART_INTERVAL:
+                            print("INFO: Restarting mic input stream to prevent idle sleep.")
+                            last_restart_time = time.time()
+                            break  # 내부 while 탈출 → with 블록 탈출 → stream 재시작
 
-                            if self.wake_word_callback:
-                                self.wake_word_callback(wake_response)
-                            return True
-        except Exception as e:
-            print(f"ERROR: Wake word detection failed: {e}")
-        return False
+                        data, _ = stream.read(4000)
+                        if recognizer.AcceptWaveform(data.tobytes()):
+                            result = json.loads(recognizer.Result())
+                            text = result.get("text", "").lower()
+                            print(f"DEBUG: Vosk recognized text: {text}")
+                            if self.WAKE_WORD in text:
+                                if self.config['STT']['use_indicators']:
+                                    self.play_beep(1200, 0.1, 44100, 0.8)  # wake tone
+                                wake_response = random.choice(self.TARS_RESPONSES)
+                                print(f"TARS: {wake_response}")
+
+                                if self.wake_word_callback:
+                                    self.wake_word_callback(wake_response)
+                                return True
+
+            except Exception as e:
+                print(f"ERROR: Wake word detection stream failed: {e}")
+                time.sleep(2)  # 장치 재시도 유예시간
 
 #Transcripe functions
     def _transcribe_utterance(self):
