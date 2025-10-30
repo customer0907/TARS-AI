@@ -101,7 +101,6 @@ def utterance_callback(message):
     try:
         # Parse the user message
         message_dict = json.loads(message)
-        print(f"DEBUG: Parsed STT result = {message_dict}")
         if not message_dict.get('text'):  # Handles cases where text is "" or missing
             #queue_message(f"TARS: Going Idle...")
             return

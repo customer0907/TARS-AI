@@ -58,7 +58,7 @@ class STTManager:
         self._load_whisper_model()
         self.silence_threshold = 10  # Default value; updated dynamically
         self.MAX_SILENT_FRAMES = 100
-        self.MAX_RECORDING_FRAMES = 60
+        self.MAX_RECORDING_FRAMES = 45
         self.WAKE_WORD = self.config['STT']['wake_word']
         self.silence_margin = 3.5
         self.TARS_RESPONSES = [
@@ -107,7 +107,7 @@ class STTManager:
         self.shutdown_event.set()
         self.thread.join()
 
-#Progress bar
+# Progress bar
     def _init_progress_bar(self):
         """Initialize progress bar for silence tracking."""
         bar_length = 10
@@ -116,11 +116,13 @@ class STTManager:
             progress = int((frames / max_frames) * bar_length)
             filled = "#" * progress
             empty = "-" * (bar_length - progress)
-            bar = f"\r[SILENCE: {filled}{empty}] {frames}/{max_frames}"
-            print(bar, end="", flush=True)
+            bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
+
+            # 한 줄 위로 올라가서 해당 줄만 클리어 후 출력
+            print("\033[F\033[K" + bar)
 
         def clear_bar():
-            print("\r" + " " * (bar_length + 30) + "\r", end="", flush=True)
+            print("\033[F\033[K", end="", flush=True)
 
         return update_bar, clear_bar
 
@@ -288,7 +290,7 @@ class STTManager:
         Detect the wake word using Vosk recognizer.
         Automatically restarts stream every 300 seconds to prevent USB sleep.
         """
-        WAKE_RESTART_INTERVAL = 300  # 5분마다 InputStream 재시작
+        WAKE_RESTART_INTERVAL = 120  # 2분마다 InputStream 재시작
         last_restart_time = time.time()
 
         if self.config['STT']['use_indicators']:
@@ -360,7 +362,6 @@ class STTManager:
                     self.loopcheck = 0 
 
                 self.loopcheck += 1
-                print(f"loop check : {self.loopcheck}")
                 
                 self.post_utterance_callback()
 
@@ -398,16 +399,12 @@ class STTManager:
             return None
 
         audio_data, sample_rate = sf.read(audio_buffer, dtype="float32")
-        print("DEBUG: audio_data shape:", audio_data.shape)
-        print("DEBUG: sample_rate:", sample_rate)
         
         audio_data = np.clip(audio_data, -1.0, 1.0)
         TARGET_SAMPLE_RATE = 16000
 
         if sample_rate != TARGET_SAMPLE_RATE:
             audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=TARGET_SAMPLE_RATE)
-            print("DEBUG: audio_data.shape after resample:",audio_data.shape)
-
         segments, _ = self.faster_whisper_model.transcribe(
             audio_data, temperature=0.0, beam_size=1, language="en"
         )

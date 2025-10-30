@@ -29,10 +29,10 @@ def map_prompt_to_ha_service(prompt: str):
     prompt = prompt.lower().strip()
 
     lights_off_list = [
-        "turn off the lights", "turn off the light", "lights off", "light off", "turn off"
+        "turn off the lights", "turn off the light", "lights off", "light off", "turn off", "turn off the right.", "turn off the rights.", "right off", "rights off"
     ]
     lights_on_list = [
-        "turn on the lights", "turn on the light", "lights on", "light on", "turn on"
+        "turn on the lights", "turn on the light", "lights on", "light on", "turn on", "turn on the rights", "turn on the right.", "rights on", "right off"
     ]
 
     if any(phrase in prompt for phrase in lights_off_list):
