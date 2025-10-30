@@ -34,6 +34,7 @@ import os
 import joblib
 from datetime import datetime
 import threading
+import socket
 
 # === Custom Modules ===
 from modules.module_websearch import search_google, search_google_news
@@ -75,6 +76,18 @@ except FileNotFoundError as e:
     except Exception as retry_exception:
         raise RuntimeError("Critical error while loading models.") from retry_exception
 
+def is_internet_available(host="8.8.8.8", port=53, timeout=2):
+    """
+    Checks whether the device has internet connectivity.
+    Default host is Google DNS (8.8.8.8).
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except Exception:
+        return False
+
 # === Functions ===
 def execute_movement(movement, times):
     """
@@ -110,139 +123,89 @@ def execute_movement(movement, times):
     thread.start()
     return thread  # Return the thread object if needed
 
-def movement_llmcall(user_input):
+def movement_llmcall_offline(user_input):
+    """Offline fallback version of movement parser."""
+    from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+    import re
+    text = user_input.lower()
+    times = 1
 
-    if CONFIG['CONTROLS']['voicemovement'] != "True":
-        # === Fallback: simple keyword mapping ===
-        from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+    m = re.search(r'(\d+)\s*(times|x)', text)
+    if m:
+        times = max(1, int(m.group(1)))
+
+    if "step forward" in text or "walk forward" in text:
+        for _ in range(times): stepForward()
+        return True
+    elif "turn left" in text:
+        for _ in range(times): turnLeft()
+        return True
+    elif "turn right" in text:
+        for _ in range(times): turnRight()
+        return True
+    elif "pose" in text and "unpose" not in text:
+        poseaction()
+        return True
+    elif "unpose" in text:
+        unposeaction()
+        return True
+
+    queue_message("[INFO] No recognizable offline movement command.")
+    return False
+
+def movement_llmcall(user_input):
+    """
+    Interpret and execute movement commands.
+    Auto-detects if LLM is available (internet/API key check),
+    falls back to offline movement control if not.
+    """
+    from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+    import re
+
+    # === ① 인터넷 연결 확인 ===
+    online_mode = is_internet_available()
+    if not online_mode:
+        queue_message("[INFO] No internet connection detected. Running in OFFLINE mode.")
+    else:
+        queue_message("[INFO] Internet connection OK. Using LLM for movement parsing.")
+
+    # === ② 오프라인 fallback 로직 ===
+    if not online_mode:
         text = user_input.lower()
-        if "step forward" in text:
-            stepForward()
+        times = 1
+
+        # 횟수 추출
+        m = re.search(r'(\d+)\s*(times|x)', text)
+        if m:
+            times = max(1, int(m.group(1)))
+
+        # 키워드 매칭
+        if "step forward" in text or "walk forward" in text:
+            for _ in range(times): stepForward()
+            return True
         elif "turn left" in text:
-            turnLeft()
+            for _ in range(times): turnLeft()
+            return True
         elif "turn right" in text:
-            turnRight()
-        elif "pose" in text:
+            for _ in range(times): turnRight()
+            return True
+        elif "pose" in text and "unpose" not in text:
             poseaction()
+            return True
         elif "unpose" in text:
             unposeaction()
-        else:
-            queue_message("[INFO] No recognized movement pattern.")
-        return
-    
-    """
-    Interpret and execute movement commands based on user input using an LLM.
+            return True
 
-    Parameters:
-    - user_input (str): The natural language command describing the desired movement (e.g., "turn right 90 degrees" or "step forward 3 times").
+        queue_message("[INFO] No recognizable offline movement command.")
+        return False
 
-    Returns:
-    - bool: True if the movement command was successfully interpreted and executed, False otherwise.
-    - str: Error message if the command could not be processed.
-    """
-    from module_llm import raw_complete_llm
-    # Define the prompt with placeholders
-    prompt = f"""
-    You are TARS, an AI module responsible for interpreting movement commands. Your job is to:
-
-    1. Determine the type of movement from the following options only:
-    - stepForward
-    - turnRight
-    - turnLeft
-    - poseaction
-    - unposeaction
-    2. Extract the number of steps or the angle of turn if applicable, where 180 degrees equals 2 steps (90 degrees = 1 step).
-    3. Respond with a structured JSON output in the exact format:
-    {{
-        "movement": "{{
-            "movement": "<MOVEMENT>",
-            "times": <TIMES>
-        }}
-    }}
-
-    Rules:
-    - Always output a single JSON object with the fields "movement" and "times".
-    - Do not output explanations, variations, or multiple commands.
-    - If no steps or angle is specified, default "times" to 1.
-    - Use precise logic for angles:
-    - Convert 90 degrees = 1 step.
-    - For angles greater than 90, calculate the number of steps (e.g., 180 degrees = 2 steps, 360 degrees = 4 steps).
-    - Determine the turn direction (turnLeft or turnRight) based on the input.
-
-    Examples:
-    Input: "Hey TARS, walk forward 3 times"
-    Output:
-    {{
-        "movement": "stepForward",
-        "times": 3
-    }}
-
-    Input: "Hey TARS, do a 180-degree turn"
-    Output:
-    {{
-        "movement": "turnLeft",
-        "times": 2
-    }}
-
-    Input: "Hey TARS, turn right twice"
-    Output:
-    {{
-        "movement": "turnRight",
-        "times": 2
-    }}
-
-    Input: "Hey TARS, pose"
-    Output:
-    {{
-        "movement": "poseaction",
-        "times": 1
-    }}
-
-    Input: "Hey TARS, unpose"
-    Output:
-    {{
-        "movement": "unposeaction",
-        "times": 1
-    }}
-
-    Instructions:
-    - Use only the specified movements (stepForward, turnRight, turnLeft, poseaction, unposeaction).
-    - Ensure the JSON output is properly formatted and follows the example structure exactly.
-    - Process the input as a single command and provide one-line JSON output.
-
-    Input: "{user_input}"
-    Output:
-    """
+    # === ③ 온라인(LLM 가능) 로직 ===
     try:
-        data = raw_complete_llm(prompt)
+        from module_llm import raw_complete_llm
+        prompt = f"""
+        You are TARS, an AI module responsible for interpreting movement commands.
 
-        import json
-        # Parse the JSON response
-        extracted_data = json.loads(data)
 
-        # Extract movement and times
-        movement = extracted_data.get("movement")
-        times = extracted_data.get("times")
-
-        queue_message(f"[DEBUG] FunctionCalling: {data}")
-        queue_message(f"[DEBUG] Extracted values: {movement}, {times}")
-
-        # Validate the extracted data
-        if movement and times:
-            if isinstance(movement, str) and isinstance(times, int):
-                queue_message("moving")
-                execute_movement(movement, times)  # Call the movement function with validated values
-                return True
-            else:
-                queue_message("[ERROR] Invalid types: 'movement' must be str and 'times' must be int.")
-                return False
-        else:
-            queue_message("[ERROR] Missing 'movement' or 'times' in the response.")
-            return False
-    
-    except Exception as e:
-        #queue_message(f"[DEBUG] Error in movement_llmcall: {e}")
-        return f"Error processing the movement command: {e}"
 
 def call_function(module_name, *args, **kwargs):
     #queue_message(f"[DEBUG] Calling module: {module_name}")
