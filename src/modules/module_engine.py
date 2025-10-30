@@ -113,6 +113,21 @@ def execute_movement(movement, times):
 def movement_llmcall(user_input):
 
     if CONFIG['CONTROLS']['voicemovement'] != "True":
+        # === Fallback: simple keyword mapping ===
+        from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+        text = user_input.lower()
+        if "step forward" in text:
+            stepForward()
+        elif "turn left" in text:
+            turnLeft()
+        elif "turn right" in text:
+            turnRight()
+        elif "pose" in text:
+            poseaction()
+        elif "unpose" in text:
+            unposeaction()
+        else:
+            queue_message("[INFO] No recognized movement pattern.")
         return
     
     """
