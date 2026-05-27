@@ -108,9 +108,11 @@ def check_secret_code(button_name):
 def stepForward():
     queue_message("MOVE: FWD")
     height_neutral_to_up()
-    torso_neutral_to_forwards()
-    torso_bump()
-    torso_return()
+    #torso_neutral_to_backwards()
+    #torso_neutral_to_forwards()
+    #torso_bump()
+    #torso_return()
+    #torso_return2()
 
 def turnRight():
     queue_message("MOVE: TurnRight")

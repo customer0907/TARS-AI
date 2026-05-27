@@ -58,7 +58,7 @@ class STTManager:
         self._load_whisper_model()
         self.silence_threshold = 10  # Default value; updated dynamically
         self.MAX_SILENT_FRAMES = 100
-        self.MAX_RECORDING_FRAMES = 45
+        self.MAX_RECORDING_FRAMES = 35 # 음성 인식 시간
         self.WAKE_WORD = self.config['STT']['wake_word']
         self.silence_margin = 3.5
         self.TARS_RESPONSES = [

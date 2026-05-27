@@ -204,14 +204,35 @@ def movement_llmcall(user_input):
         from module_llm import raw_complete_llm
         prompt = f"""
         You are TARS, an AI module responsible for interpreting movement commands.
+        (same as original JSON prompt…)
+        Input: "{user_input}"
+        Output:
+        """
+        data = raw_complete_llm(prompt)
 
+        import json
+        extracted_data = json.loads(data)
+        movement = extracted_data.get("movement")
+        times = extracted_data.get("times")
 
+        queue_message(f"[DEBUG] Extracted: movement={movement}, times={times}")
+
+        if movement and times:
+            execute_movement(movement, times)
+            return True
+        else:
+            queue_message("[ERROR] Invalid LLM output. Falling back to offline mode.")
+            return movement_llmcall_offline(user_input)  # fallback 재시도
+    except Exception as e:
+        queue_message(f"[ERROR] LLM call failed ({e}). Running offline fallback.")
+        return movement_llmcall_offline(user_input)
 
 def call_function(module_name, *args, **kwargs):
     #queue_message(f"[DEBUG] Calling module: {module_name}")
     if module_name not in FUNCTION_REGISTRY:
         #queue_message(f"[DEBUG] No function registered for module: {module_name}")
         return "Not a Function"
+
     func = FUNCTION_REGISTRY[module_name]
     try:
         # Check if the function requires arguments
