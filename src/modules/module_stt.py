@@ -359,9 +359,14 @@ class STTManager:
         if sample_rate != self.DEFAULT_SAMPLE_RATE:
             audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=self.DEFAULT_SAMPLE_RATE)
 
-        segments, _ = self.faster_whisper_model.transcribe(
-            audio_data, temperature=0.0, beam_size=1, language="en"
-        )
+        # Language is configurable via [STT] stt_language in config.ini.
+        # Defaults to "en" for backward compatibility. Set "ko" for Korean,
+        # or use "auto" to let faster-whisper detect the language per utterance.
+        stt_lang = self.config.get("STT", {}).get("stt_language", "en")
+        whisper_kwargs = {"temperature": 0.0, "beam_size": 1}
+        if stt_lang and stt_lang.lower() != "auto":
+            whisper_kwargs["language"] = stt_lang
+        segments, _ = self.faster_whisper_model.transcribe(audio_data, **whisper_kwargs)
         transcribed_text = " ".join(segment.text for segment in segments).strip()
         if transcribed_text:
             formatted_result = {"text": transcribed_text}

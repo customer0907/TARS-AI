@@ -26,6 +26,11 @@ from modules.module_espeak import text_to_speech_with_pipelining_espeak
 from modules.module_alltalk import text_to_speech_with_pipelining_alltalk
 from modules.module_elevenlabs import text_to_speech_with_pipelining_elevenlabs
 from modules.module_azure import text_to_speech_with_pipelining_azure
+# Korean MeloTTS is optional — imported lazily so absent installs don't break other engines.
+try:
+    from modules.module_melotts import text_to_speech_with_pipelining_melotts
+except Exception:
+    text_to_speech_with_pipelining_melotts = None
 from modules.module_messageQue import queue_message
 
 def update_tts_settings(ttsurl):
@@ -127,6 +132,16 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
         elif ttsoption == "piper":
             async for chunk in text_to_speech_with_pipelining_piper(text):
                 yield chunk  
+
+        # Local Korean TTS using MeloTTS-Korean (pretrained)
+        elif ttsoption == "melotts_ko":
+            if text_to_speech_with_pipelining_melotts is None:
+                raise RuntimeError(
+                    "melotts_ko selected but MeloTTS is not installed. "
+                    "Run: pip install git+https://github.com/myshell-ai/MeloTTS.git"
+                )
+            async for chunk in text_to_speech_with_pipelining_melotts(text):
+                yield chunk
 
         elif ttsoption == "elevenlabs":
             async for chunk in text_to_speech_with_pipelining_elevenlabs(text):

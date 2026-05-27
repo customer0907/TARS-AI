@@ -136,9 +136,11 @@ def utterance_callback(message):
         # Stream the AI's reply
         queue_message(f"TARS: {reply}", stream=True) 
 
-        # Strip special chars so he doesnt say them
-        reply = re.sub(r'[^a-zA-Z0-9\s.,?!;:"\'-]', '', reply)
-        
+        # Strip emoji and other symbols, but KEEP letters/digits/punct of any script.
+        # \w covers Unicode word chars (incl. Korean Hangul, CJK, accents...).
+        # Previous version was ASCII-only and would erase Korean entirely.
+        reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
+
         # Stream TTS audio to speakers
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']['ttsoption']))
 
