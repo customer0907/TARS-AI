@@ -7,6 +7,12 @@ sentence-transformers   # Sentence embeddings and semantic search
 elevenlabs              # External TTS using 11Labs API
 piper-tts              # Local TTS with voice cloning support
 azure-cognitiveservices-speech  # Azure TTS API
+# --- Korean TTS (optional, only needed when ttsoption=melotts_ko) ---
+# MeloTTS is installed from GitHub (not on PyPI under this name).
+# Run separately:
+#   pip install git+https://github.com/myshell-ai/MeloTTS.git
+#   pip install g2pkk python-mecab-ko
+#   python -m unidic download
 
 # STT (Speech-to-Text) & VAD Tools
 faster-whisper          # Local STT using Faster Whisper
