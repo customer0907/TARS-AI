@@ -337,6 +337,7 @@ class STTManager:
         Reopens the mic stream only on errors — not on a fixed timer.
         """
         MAX_SILENT_READS = 80  # ~8s of dead frames before reopen
+        MAX_OVERFLOW_STREAK = 200  # reopen only after sustained xruns
 
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
@@ -350,6 +351,7 @@ class STTManager:
             recognizer = self._new_wake_recognizer()
             last_partial = ""
             silent_reads = 0
+            overflow_streak = 0
 
             try:
                 self._release_audio_input()
@@ -357,7 +359,7 @@ class STTManager:
                     samplerate=self.SAMPLE_RATE,
                     channels=1,
                     dtype='int16',
-                    blocksize=8000,
+                    blocksize=4000,
                     latency='high',
                     device=mic_index
                 ) as stream:
@@ -369,10 +371,22 @@ class STTManager:
 
                         data, overflowed = stream.read(4000)
                         if overflowed:
-                            print("WARNING: wake mic overflow, reopening stream.")
-                            break
+                            overflow_streak += 1
+                            if overflow_streak in (1, 50, 100, 150):
+                                print(
+                                    f"WARNING: wake mic overflow "
+                                    f"({overflow_streak}), continuing..."
+                                )
+                            if overflow_streak >= MAX_OVERFLOW_STREAK:
+                                print("WARNING: too many overflows, reopening stream.")
+                                break
+                            # PortAudio still returns usable audio; keep listening.
+                        else:
+                            overflow_streak = 0
 
-                        if data is None or data.size == 0 or np.max(np.abs(data)) == 0:
+                        if data is None or data.size == 0:
+                            silent_reads += 1
+                        elif np.max(np.abs(data)) == 0:
                             silent_reads += 1
                         else:
                             silent_reads = 0
