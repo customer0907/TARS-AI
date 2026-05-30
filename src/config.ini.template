@@ -109,8 +109,6 @@ toggle_charvoice = True
 # Use character-specific voice settings
 tts_voice = en-US-Steffan:DragonHDLatestNeural
 # Name of the cloned voice to use (e.g., TARS2 or en-US-Steffan:DragonHDLatestNeural for azure)
-tts_speed = 1.08
-# Playback speed multiplier. 1.0 = normal, 1.05-1.15 is usually natural.
 voice_id = JBFqnCBsd6RMkjVDRZzb
 # Voice ID of ElevenLabs (e.g.,JBFqnCBsd6RMkjVDRZzb)
 model_id = eleven_multilingual_v2

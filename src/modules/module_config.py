@@ -27,7 +27,6 @@ class TTSConfig:
     ttsoption: str
     toggle_charvoice: bool
     tts_voice: Optional[str]
-    tts_speed: float
     voice_only: bool
     is_talking_override: bool
     is_talking: bool
@@ -72,7 +71,6 @@ class TTSConfig:
             ttsoption=config_dict['ttsoption'],
             toggle_charvoice=config_dict['toggle_charvoice'],
             tts_voice=config_dict['tts_voice'],
-            tts_speed=config_dict.get('tts_speed', 1.0),
             voice_only=config_dict['voice_only'],
             is_talking_override=config_dict['is_talking_override'],
             is_talking=config_dict['is_talking'],
@@ -206,7 +204,6 @@ def load_config():
             "ttsurl": config['TTS']['ttsurl'],
             "toggle_charvoice": config.getboolean('TTS', 'toggle_charvoice'),
             "tts_voice": config['TTS']['tts_voice'],
-            "tts_speed": config.getfloat('TTS', 'tts_speed', fallback=1.0),
             "voice_id": config['TTS']['voice_id'],
             "model_id": config['TTS']['model_id'],
             "voice_only": config.getboolean('TTS', 'voice_only'),
