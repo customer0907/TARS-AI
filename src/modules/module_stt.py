@@ -320,8 +320,11 @@ class STTManager:
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
-                    # If wake word detected, transcribe the user utterance
-                    self._transcribe_utterance()
+                    self.loopcheck = 0
+                    while self.running and self.loopcheck < 10:
+                        self._transcribe_utterance()
+                        self.loopcheck += 1
+                    self.loopcheck = 0
         except Exception as e:
             print(f"ERROR: Error in STT processing loop: {e}")
         finally:
@@ -331,10 +334,9 @@ class STTManager:
     def _detect_wake_word(self) -> bool:
         """
         Detect the wake word using Vosk recognizer.
-        Periodically restarts the mic stream to prevent USB/ALSA idle failures.
+        Reopens the mic stream only on errors — not on a fixed timer.
         """
-        WAKE_RESTART_INTERVAL = 120  # seconds between stream restarts
-        MAX_SILENT_READS = 40  # ~4s of all-zero frames → force stream reopen
+        MAX_SILENT_READS = 80  # ~8s of dead frames before reopen
 
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
@@ -342,12 +344,12 @@ class STTManager:
 
         mic_index = self._get_input_device()
         last_heartbeat = time.time()
+        wake_response = None
 
-        while self.running and not self.shutdown_event.is_set():
+        while self.running and not self.shutdown_event.is_set() and wake_response is None:
             recognizer = self._new_wake_recognizer()
             last_partial = ""
             silent_reads = 0
-            stream_open_time = time.time()
 
             try:
                 self._release_audio_input()
@@ -361,28 +363,22 @@ class STTManager:
                 ) as stream:
                     print("InputStream opened successfully")
                     while self.running and not self.shutdown_event.is_set():
-                        if time.time() - stream_open_time > WAKE_RESTART_INTERVAL:
-                            print("INFO: Restarting mic input stream to prevent idle sleep.")
-                            break
-
                         if time.time() - last_heartbeat > 60:
                             print("DEBUG: Waiting for wake word...")
                             last_heartbeat = time.time()
 
                         data, overflowed = stream.read(4000)
                         if overflowed:
-                            print("WARNING: wake mic input overflowed, reopening stream.")
+                            print("WARNING: wake mic overflow, reopening stream.")
                             break
 
-                        if data is None or data.size == 0:
-                            silent_reads += 1
-                        elif np.max(np.abs(data)) == 0:
+                        if data is None or data.size == 0 or np.max(np.abs(data)) == 0:
                             silent_reads += 1
                         else:
                             silent_reads = 0
 
                         if silent_reads >= MAX_SILENT_READS:
-                            print("WARNING: mic input silent too long, reopening stream.")
+                            print("WARNING: mic input dead, reopening stream.")
                             break
 
                         if recognizer.AcceptWaveform(data.tobytes()):
@@ -391,25 +387,15 @@ class STTManager:
                             if text:
                                 print(f"DEBUG: Vosk recognized text: {text}")
                             if self.WAKE_WORD in text:
-                                self.loopcheck = 0
                                 if self.config['STT']['use_indicators']:
-                                    self.play_beep(1200, 0.1, 44100, 0.8)  # wake tone
+                                    self.play_beep(1200, 0.1, 44100, 0.8)
                                 wake_response = random.choice(self.TARS_RESPONSES)
-                                print(f"TARS: {wake_response}")
-
-                                if self.wake_word_callback:
-                                    self.wake_word_callback(wake_response)
-                                return True
+                                break
                             last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
                             ptext = partial.get("partial", "").strip().lower()
-                            if (
-                                ptext
-                                and ptext != last_partial
-                                and len(ptext) > 2
-                                and ptext != "huh"
-                            ):
+                            if ptext and ptext != last_partial and len(ptext) > 2:
                                 print(f"DEBUG: Vosk partial: {ptext}")
                                 last_partial = ptext
 
@@ -422,6 +408,13 @@ class STTManager:
                 except Exception as dev_err:
                     print(f"ERROR: Could not re-open mic: {dev_err}")
                 time.sleep(3)
+
+        if wake_response:
+            print(f"TARS: {wake_response}")
+            self._release_audio_input()
+            if self.wake_word_callback:
+                self.wake_word_callback(wake_response)
+            return True
 
         return False
 
@@ -446,17 +439,7 @@ class STTManager:
             print(f"ERROR: Utterance transcription failed: {e}")
         finally:
             self.clear_bar()
-
-        if not hasattr(self, 'loopcheck'):
-            self.loopcheck = 0
-
-        self.loopcheck += 1
-        if self.loopcheck > 10:
-            self.loopcheck = 0
-            return
-
-        if self.post_utterance_callback:
-            self.post_utterance_callback()
+            self._release_audio_input()
 
     def _transcribe_with_faster_whisper(self):
         """Transcribe audio using Faster-Whisper."""
@@ -465,6 +448,7 @@ class STTManager:
         silent_frames = 0
         mic_index = self._get_input_device()
 
+        self._release_audio_input()
         try:
             with sd.InputStream(
                 samplerate=self.SAMPLE_RATE,

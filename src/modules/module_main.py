@@ -88,7 +88,10 @@ def wake_word_callback(wake_response):
 
     Parameters:
     - wake_response (str): The response to the wake word.
-    """ 
+    """
+    global stt_manager
+    if stt_manager:
+        stt_manager._release_audio_input()
     asyncio.run(play_audio_chunks(wake_response, CONFIG['TTS']['ttsoption']))
 
 def utterance_callback(message):
@@ -142,7 +145,9 @@ def utterance_callback(message):
         # \w covers Unicode word chars (incl. Korean Hangul, CJK, accents...).
         # Previous version was ASCII-only and would erase Korean entirely.
         reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
-        
+
+        if stt_manager:
+            stt_manager._release_audio_input()
         # Stream TTS audio to speakers
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
 
