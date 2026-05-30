@@ -61,7 +61,10 @@ class STTManager:
         self.MAX_SILENT_FRAMES = 100
         self.MAX_RECORDING_FRAMES = 35 # 음성 인식 시간
         self.LISTEN_SILENT_FRAMES = int(
-            self.config['STT'].get('listen_silent_frames', 30)
+            self.config['STT'].get('listen_silent_frames', 50)
+        )
+        self.MAX_EMPTY_LISTEN_ATTEMPTS = int(
+            self.config['STT'].get('max_empty_listen_attempts', 3)
         )
         self.WHISPER_TIMEOUT_SEC = int(
             self.config['STT'].get('whisper_timeout_sec', 45)
@@ -319,13 +322,15 @@ class STTManager:
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
-                    self.loopcheck = 0
-                    while self.running and self.loopcheck < 10:
-                        if not self._transcribe_utterance():
-                            break
-                        self.loopcheck += 1
+                    empty_attempts = 0
+                    while self.running:
+                        if self._transcribe_utterance():
+                            empty_attempts = 0
+                        else:
+                            empty_attempts += 1
+                            if empty_attempts >= self.MAX_EMPTY_LISTEN_ATTEMPTS:
+                                break
                     self._release_audio_input()
-                    self.loopcheck = 0
         except Exception as e:
             print(f"ERROR: Error in STT processing loop: {e}")
         finally:
@@ -419,13 +424,9 @@ class STTManager:
 
         if wake_response:
             print(f"TARS: {wake_response}")
+            self._release_audio_input(pause=0.05)
             if self.wake_word_callback:
-                threading.Thread(
-                    target=self.wake_word_callback,
-                    args=(wake_response,),
-                    daemon=True,
-                    name="WakeTTS",
-                ).start()
+                self.wake_word_callback(wake_response)
             return True
 
         return False
@@ -436,7 +437,7 @@ class STTManager:
         Process a user utterance after wake word detection.
         Returns True if speech was transcribed and handled.
         """
-        print(f"STAT: Listening...")
+        print(f"\nSTAT: Listening...")
         result = None
         try:
             processor = self.config["STT"].get("stt_processor", "vosk")
