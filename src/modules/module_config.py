@@ -156,7 +156,7 @@ def load_config():
             "wake_responses_file": config.get(
                 'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
             ),
-            "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='30')),
+            "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='18')),
             "whisper_timeout_sec": int(config.get('STT', 'whisper_timeout_sec', fallback='45')),
         },
         "CHAR": {

@@ -139,13 +139,14 @@ class STTManager:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=5.0)
 
-    def _release_audio_input(self):
-        """Release PortAudio/ALSA so the USB mic can recover after errors or restarts."""
+    def _release_audio_input(self, pause=0.05):
+        """Release PortAudio/ALSA input. Short pause by default for faster turn-around."""
         try:
             sd.stop()
         except Exception as e:
             print(f"WARNING: sd.stop() failed: {e}")
-        time.sleep(0.3)
+        if pause > 0:
+            time.sleep(pause)
 
     def _new_wake_recognizer(self):
         return KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
@@ -318,14 +319,12 @@ class STTManager:
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
-                    delay = int(self.config['STT'].get('speechdelay', 20)) / 10.0
-                    if delay > 0:
-                        time.sleep(delay)
                     self.loopcheck = 0
                     while self.running and self.loopcheck < 10:
                         if not self._transcribe_utterance():
                             break
                         self.loopcheck += 1
+                    self._release_audio_input()
                     self.loopcheck = 0
         except Exception as e:
             print(f"ERROR: Error in STT processing loop: {e}")
@@ -411,18 +410,22 @@ class STTManager:
             except Exception as e:
                 print(f"ERROR: Wake word detection stream failed: {e}")
                 self.mic_index = None
-                self._release_audio_input()
+                self._release_audio_input(pause=0.3)
                 try:
                     mic_index = self._get_input_device()
                 except Exception as dev_err:
                     print(f"ERROR: Could not re-open mic: {dev_err}")
-                time.sleep(3)
+                time.sleep(2)
 
         if wake_response:
             print(f"TARS: {wake_response}")
-            self._release_audio_input()
             if self.wake_word_callback:
-                self.wake_word_callback(wake_response)
+                threading.Thread(
+                    target=self.wake_word_callback,
+                    args=(wake_response,),
+                    daemon=True,
+                    name="WakeTTS",
+                ).start()
             return True
 
         return False
@@ -450,7 +453,6 @@ class STTManager:
             print(f"ERROR: Utterance transcription failed: {e}")
         finally:
             self.clear_bar()
-            self._release_audio_input()
 
         return bool(result)
 
@@ -461,7 +463,6 @@ class STTManager:
         silent_frames = 0
         mic_index = self._get_input_device()
 
-        self._release_audio_input()
         try:
             with sd.InputStream(
                 samplerate=self.SAMPLE_RATE,

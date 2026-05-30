@@ -30,8 +30,8 @@ speechdelay = 20
 # Tenths of seconds to wait before goint to sleep (20 = 2 seconds)
 wake_responses_file = character/TARS/wake_responses_en.txt
 # One wake TTS line per row (UTF-8). Lines starting with # are ignored.
-listen_silent_frames = 30
-# Silence frames before giving up on command listen (~3s). Lower = faster return to sleep.
+listen_silent_frames = 18
+# Silence frames to end one utterance (~1.8s). Lower = faster handoff between turns.
 whisper_timeout_sec = 45
 # Max seconds for Faster-Whisper on Pi; prevents indefinite hang.
 

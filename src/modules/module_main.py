@@ -84,14 +84,8 @@ def process_discord_message_callback(user_message):
 
 def wake_word_callback(wake_response):
     """
-    Play initial response when wake word is detected.
-
-    Parameters:
-    - wake_response (str): The response to the wake word.
+    Play initial response when wake word is detected (runs in a background thread).
     """
-    global stt_manager
-    if stt_manager:
-        stt_manager._release_audio_input()
     asyncio.run(play_audio_chunks(wake_response, CONFIG['TTS']['ttsoption']))
 
 def utterance_callback(message):
@@ -147,7 +141,7 @@ def utterance_callback(message):
         reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
 
         if stt_manager:
-            stt_manager._release_audio_input()
+            stt_manager._release_audio_input(pause=0.05)
         # Stream TTS audio to speakers
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
 
