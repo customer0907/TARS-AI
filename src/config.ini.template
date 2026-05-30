@@ -32,6 +32,8 @@ listen_silent_frames = 50
 # Max for [SILENCE: #####---] bar (e.g. 50/50). One frame ~100ms.
 max_empty_listen_attempts = 3
 # After wake/TTS: retry listen this many times if no speech, then Sleeping.
+stt_debug = true
+# [STT +X.XXs] timing logs for listen/whisper/LLM/TTS bottlenecks
 whisper_timeout_sec = 45
 # Max seconds for Faster-Whisper on Pi; prevents indefinite hang.
 wake_responses_file = character/TARS/wake_responses_en.txt

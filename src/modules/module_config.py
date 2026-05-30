@@ -161,6 +161,7 @@ def load_config():
                 config.get('STT', 'max_empty_listen_attempts', fallback='3')
             ),
             "whisper_timeout_sec": int(config.get('STT', 'whisper_timeout_sec', fallback='45')),
+            "stt_debug": config.get('STT', 'stt_debug', fallback='true'),
         },
         "CHAR": {
             "character_card_path": config['CHAR']['character_card_path'],

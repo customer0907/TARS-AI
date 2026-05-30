@@ -113,7 +113,12 @@ def utterance_callback(message):
             return  # Exit function after issuing shutdown command
         
         # Process the message using process_completion
-        reply = process_completion(message_dict['text'])  # Process the message
+        t0 = time.time()
+        if stt_manager and stt_manager.stt_debug:
+            stt_manager._stt_debug("LLM process_completion start")
+        reply = process_completion(message_dict['text'])
+        if stt_manager and stt_manager.stt_debug:
+            stt_manager._stt_debug(f"LLM process_completion done ({time.time() - t0:.2f}s)")
         print(f"DEBUG: Generated reply = {reply}")
 
         # Extract the <think> block if present
@@ -142,8 +147,12 @@ def utterance_callback(message):
 
         if stt_manager:
             stt_manager._release_audio_input(pause=0.05)
-        # Stream TTS audio to speakers
+        if stt_manager and stt_manager.stt_debug:
+            stt_manager._stt_debug("TTS play_audio_chunks start")
+        t0 = time.time()
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
+        if stt_manager and stt_manager.stt_debug:
+            stt_manager._stt_debug(f"TTS play_audio_chunks done ({time.time() - t0:.2f}s)")
 
     except json.JSONDecodeError:
         queue_message("ERROR: Invalid JSON format. Could not process user message.")

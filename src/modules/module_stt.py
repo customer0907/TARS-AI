@@ -77,6 +77,19 @@ class STTManager:
         self._measure_background_noise()
         self.update_bar, self.clear_bar = self._init_progress_bar()
         self.vadmethod = self.config['STT']['vad_method']
+        self.stt_debug = str(
+            self.config['STT'].get('stt_debug', 'true')
+        ).lower() in ('true', '1', 'yes')
+        self._stt_debug_t0 = time.time()
+
+    def _stt_debug_reset(self):
+        self._stt_debug_t0 = time.time()
+
+    def _stt_debug(self, msg):
+        if not self.stt_debug:
+            return
+        elapsed = time.time() - self._stt_debug_t0
+        print(f"[STT +{elapsed:6.2f}s] {msg}", flush=True)
 
     def _load_wake_responses(self):
         """Load wake-word TTS lines from config file; fall back to built-in English list."""
@@ -211,6 +224,11 @@ class STTManager:
                 return False, detected_speech, silent_frames
 
             if rms > self.silence_threshold_margin:
+                if not detected_speech:
+                    self._stt_debug(
+                        f"VAD: speech detected rms={rms:.1f} "
+                        f"threshold={self.silence_threshold_margin:.1f}"
+                    )
                 detected_speech = True
                 silent_frames = 0
                 
@@ -227,6 +245,10 @@ class STTManager:
                 update_bar(silent_frames, self.LISTEN_SILENT_FRAMES)
 
                 if silent_frames > self.LISTEN_SILENT_FRAMES:
+                    self._stt_debug(
+                        f"VAD: end-of-utterance silence "
+                        f"frames={silent_frames}/{self.LISTEN_SILENT_FRAMES}"
+                    )
                     clear_bar()
                     return True, detected_speech, silent_frames
 
@@ -322,15 +344,28 @@ class STTManager:
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
+                    self._stt_debug_reset()
+                    self._stt_debug("wake session start")
                     empty_attempts = 0
                     while self.running:
+                        self._stt_debug(
+                            f"listen attempt {empty_attempts + 1}/"
+                            f"{self.MAX_EMPTY_LISTEN_ATTEMPTS}"
+                        )
                         if self._transcribe_utterance():
                             empty_attempts = 0
+                            self._stt_debug("listen attempt succeeded")
                         else:
                             empty_attempts += 1
+                            self._stt_debug(
+                                f"listen attempt failed "
+                                f"({empty_attempts}/{self.MAX_EMPTY_LISTEN_ATTEMPTS})"
+                            )
                             if empty_attempts >= self.MAX_EMPTY_LISTEN_ATTEMPTS:
+                                self._stt_debug("empty limit reached → sleeping")
                                 break
                     self._release_audio_input()
+                    self._stt_debug("wake session end")
         except Exception as e:
             print(f"ERROR: Error in STT processing loop: {e}")
         finally:
@@ -424,9 +459,12 @@ class STTManager:
 
         if wake_response:
             print(f"TARS: {wake_response}")
+            self._stt_debug("wake TTS start")
             self._release_audio_input(pause=0.05)
             if self.wake_word_callback:
+                t0 = time.time()
                 self.wake_word_callback(wake_response)
+                self._stt_debug(f"wake TTS done ({time.time() - t0:.2f}s)")
             return True
 
         return False
@@ -438,6 +476,7 @@ class STTManager:
         Returns True if speech was transcribed and handled.
         """
         print(f"\nSTAT: Listening...")
+        self._stt_debug(f"transcribe start processor={self.config['STT'].get('stt_processor')}")
         result = None
         try:
             processor = self.config["STT"].get("stt_processor", "vosk")
@@ -452,9 +491,11 @@ class STTManager:
                 print("transcribe_with_vosk() starts.")
         except Exception as e:
             print(f"ERROR: Utterance transcription failed: {e}")
+            self._stt_debug(f"transcribe exception: {e}")
         finally:
             self.clear_bar()
 
+        self._stt_debug(f"transcribe end success={bool(result)}")
         return bool(result)
 
     def _transcribe_with_faster_whisper(self):
@@ -463,55 +504,100 @@ class STTManager:
         detected_speech = False
         silent_frames = 0
         mic_index = self._get_input_device()
+        last_speech_log = time.time()
 
+        self._stt_debug("whisper: opening InputStream")
         try:
             with sd.InputStream(
                 samplerate=self.SAMPLE_RATE,
                 channels=1,
                 dtype="int16",
                 device=mic_index,
-                blocksize=8000,
+                blocksize=4000,
                 latency="high",
             ) as stream, wave.open(audio_buffer, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(self.SAMPLE_RATE)
-                for _ in range(self.MAX_RECORDING_FRAMES):
+                self._stt_debug(
+                    f"whisper: recording max_frames={self.MAX_RECORDING_FRAMES} "
+                    f"silence_limit={self.LISTEN_SILENT_FRAMES}"
+                )
+                for frame_i in range(self.MAX_RECORDING_FRAMES):
                     if not self.running or self.shutdown_event.is_set():
+                        self._stt_debug("whisper: aborted (shutdown)")
                         return None
 
-                    data, _ = stream.read(4000)
+                    if frame_i % 10 == 0:
+                        self._stt_debug(
+                            f"whisper: frame={frame_i} silent={silent_frames} "
+                            f"speech={detected_speech}"
+                        )
+
+                    t_read = time.time()
+                    data, overflowed = stream.read(4000)
+                    read_ms = (time.time() - t_read) * 1000
+                    if read_ms > 300:
+                        self._stt_debug(
+                            f"whisper: SLOW stream.read {read_ms:.0f}ms "
+                            f"frame={frame_i} overflow={overflowed}"
+                        )
 
                     is_silence, detected_speech, silent_frames = self.voice_activity_detection_main(
                         data, detected_speech, silent_frames
                     )
+                    if detected_speech and time.time() - last_speech_log >= 1.0:
+                        self._stt_debug(
+                            f"whisper: recording speech… silent={silent_frames}"
+                        )
+                        last_speech_log = time.time()
+
                     if is_silence:
                         if not detected_speech:
+                            self._stt_debug(
+                                f"whisper: no speech timeout silent={silent_frames}"
+                            )
                             return None
+                        self._stt_debug("whisper: speech ended (silence after speech)")
                         break
 
                     if not detected_speech and silent_frames >= self.LISTEN_SILENT_FRAMES:
+                        self._stt_debug(
+                            f"whisper: idle timeout silent={silent_frames}"
+                        )
                         return None
 
                     wf.writeframes(data.tobytes())
+                else:
+                    self._stt_debug("whisper: max recording frames reached")
+        except Exception as e:
+            self._stt_debug(f"whisper: record error: {e}")
+            raise
         finally:
             self.clear_bar()
 
         if not detected_speech:
+            self._stt_debug("whisper: no speech in buffer")
             return None
 
         audio_buffer.seek(0)
+        nbytes = audio_buffer.getbuffer().nbytes
+        self._stt_debug(f"whisper: recorded {nbytes} bytes")
 
-        if audio_buffer.getbuffer().nbytes == 0:
+        if nbytes == 0:
             queue_message("ERROR: No audio recorded.")
             return None
 
+        t0 = time.time()
         audio_data, sample_rate = sf.read(audio_buffer, dtype="float32")
+        self._stt_debug(f"whisper: sf.read ({time.time() - t0:.2f}s)")
         audio_data = np.clip(audio_data, -1.0, 1.0)
         TARGET_SAMPLE_RATE = 16000
 
         if sample_rate != TARGET_SAMPLE_RATE:
+            t0 = time.time()
             audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=TARGET_SAMPLE_RATE)
+            self._stt_debug(f"whisper: resample ({time.time() - t0:.2f}s)")
 
         stt_lang = self.config.get("STT", {}).get("stt_language", "en")
         whisper_kwargs = {"temperature": 0.0, "beam_size": 1}
@@ -522,28 +608,38 @@ class STTManager:
             queue_message("ERROR: Faster-Whisper model is not loaded.")
             return None
 
+        self._stt_debug(f"whisper: inference start lang={stt_lang}")
         try:
+            t0 = time.time()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(
                     self._run_whisper_transcribe, audio_data, whisper_kwargs
                 )
                 segments = future.result(timeout=self.WHISPER_TIMEOUT_SEC)
+            self._stt_debug(f"whisper: inference done ({time.time() - t0:.2f}s)")
         except concurrent.futures.TimeoutError:
+            self._stt_debug(f"whisper: inference TIMEOUT {self.WHISPER_TIMEOUT_SEC}s")
             queue_message(
                 f"ERROR: Faster-Whisper timed out after {self.WHISPER_TIMEOUT_SEC}s."
             )
             return None
         except Exception as e:
+            self._stt_debug(f"whisper: inference error: {e}")
             queue_message(f"ERROR: Faster-Whisper transcription failed: {e}")
             return None
 
         transcribed_text = " ".join(segment.text for segment in segments).strip()
+        self._stt_debug(f"whisper: text={transcribed_text!r}")
         if transcribed_text:
             formatted_result = {"text": transcribed_text}
             if self.utterance_callback:
+                self._stt_debug("utterance_callback start (LLM+TTS)")
+                t0 = time.time()
                 self.utterance_callback(json.dumps(formatted_result))
+                self._stt_debug(f"utterance_callback done ({time.time() - t0:.2f}s)")
             return formatted_result
 
+        self._stt_debug("whisper: empty transcription")
         print("INFO: No transcription from Faster-Whisper (empty result).")
         return None
 
