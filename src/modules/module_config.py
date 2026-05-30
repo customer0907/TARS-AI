@@ -148,6 +148,7 @@ def load_config():
             "stt_processor": config['STT']['stt_processor'],
             "external_url": config['STT']['external_url'],
             "whisper_model": config['STT']['whisper_model'],
+            "stt_language": config.get('STT', 'stt_language', fallback='en'),
             "vosk_model": config['STT']['vosk_model'],
             "use_indicators": config.getboolean('STT', 'use_indicators'),
             "vad_method": config['STT']['vad_method'],

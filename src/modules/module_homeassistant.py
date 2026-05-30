@@ -29,10 +29,11 @@ def map_prompt_to_ha_service(prompt: str):
     prompt = prompt.lower().strip()
 
     lights_off_list = [
-        "Turn off the lights.", "Turn off the light.", "Turn off the lights", "Turn off the light", "turn off the lights", "turn off the light", "lights off", "light off", "turn off", "turn off the right.", "turn off the rights.", "right off", "rights off"
+        "Turn off the lights.", "Turn off the light.", "Turn off the lights", "Turn off the light", "turn off the lights", "turn off the light", "lights off", "light off", "turn off", "turn off the right.", "turn off the rights.", "right off", "rights off","불 꺼", "불 꺼줘", "불 좀 꺼", "불 좀 꺼줘", "불 거", "불좀 꺼줘",
+    "조명 꺼", "조명 꺼줘", "전등 꺼", "불꺼", "불좀 꺼", "불좀 꺼져", "불꺼져", "불 꺼져", "물좀 꺼", "물 좀 꺼", "물좀 꺼줘", "물좀 꺼져", "물고", "불고","둘 좀꺼"
     ]
     lights_on_list = [
-        "Turn on the lights.", "Turn on the light.", "Turn on the lights", "Turn on the light", "turn on the lights", "turn on the light", "lights on", "light on", "turn on", "turn on the rights", "turn on the right.", "rights on", "right off"
+        "Turn on the lights.", "Turn on the light.", "Turn on the lights", "Turn on the light", "turn on the lights", "turn on the light", "lights on", "light on", "turn on", "turn on the rights", "turn on the right.", "rights on", "right off", "불 켜", "불 켜줘", "불 좀 켜", "불 좀 켜줘", "조명 켜", "전등 켜", "불켜", "불겨","불 켜", "불좀 켜", "불좀켜줘", "불 좀 켜줘", "불 키라니깐", "불 키라고", "물 켜줘", "물 켜", "물좀 켜", "물키라고", "둘좀 켜", "둘 켜"
     ]
 
     if any(phrase in prompt for phrase in lights_off_list):

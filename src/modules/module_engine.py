@@ -247,6 +247,12 @@ def check_for_module(user_input):
     """
     Determines the appropriate module to handle the user's input and invokes it.
     """
+    if CONFIG['HOME_ASSISTANT']['enabled'] == "True":
+        from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
+        if map_prompt_to_ha_service(user_input):
+            queue_message("TOOL: HA keyword match")
+            return send_prompt_to_homeassistant(user_input)
+
     predicted_class, probability = predict_class(user_input)
     if not predicted_class:
         return "None"
