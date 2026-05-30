@@ -135,7 +135,20 @@ class STTManager:
         """
         self.running = False
         self.shutdown_event.set()
-        self.thread.join()
+        self._release_audio_input()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5.0)
+
+    def _release_audio_input(self):
+        """Release PortAudio/ALSA so the USB mic can recover after errors or restarts."""
+        try:
+            sd.stop()
+        except Exception as e:
+            print(f"WARNING: sd.stop() failed: {e}")
+        time.sleep(0.3)
+
+    def _new_wake_recognizer(self):
+        return KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
 
 # Progress bar
     def _init_progress_bar(self):
@@ -318,22 +331,26 @@ class STTManager:
     def _detect_wake_word(self) -> bool:
         """
         Detect the wake word using Vosk recognizer.
-        Automatically restarts stream every 300 seconds to prevent USB sleep.
+        Periodically restarts the mic stream to prevent USB/ALSA idle failures.
         """
-        WAKE_RESTART_INTERVAL = 120  # 2분마다 InputStream 재시작
-        last_restart_time = time.time()
+        WAKE_RESTART_INTERVAL = 120  # seconds between stream restarts
+        MAX_SILENT_READS = 40  # ~4s of all-zero frames → force stream reopen
 
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
         print(f"TARS: Sleeping...")
 
-        recognizer = KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
         mic_index = self._get_input_device()
         last_heartbeat = time.time()
-        last_partial = ""
 
         while self.running and not self.shutdown_event.is_set():
+            recognizer = self._new_wake_recognizer()
+            last_partial = ""
+            silent_reads = 0
+            stream_open_time = time.time()
+
             try:
+                self._release_audio_input()
                 with sd.InputStream(
                     samplerate=self.SAMPLE_RATE,
                     channels=1,
@@ -344,20 +361,35 @@ class STTManager:
                 ) as stream:
                     print("InputStream opened successfully")
                     while self.running and not self.shutdown_event.is_set():
-                        if time.time() - last_restart_time > WAKE_RESTART_INTERVAL:
+                        if time.time() - stream_open_time > WAKE_RESTART_INTERVAL:
                             print("INFO: Restarting mic input stream to prevent idle sleep.")
-                            last_restart_time = time.time()
                             break
 
                         if time.time() - last_heartbeat > 60:
                             print("DEBUG: Waiting for wake word...")
                             last_heartbeat = time.time()
 
-                        data, _ = stream.read(4000)
+                        data, overflowed = stream.read(4000)
+                        if overflowed:
+                            print("WARNING: wake mic input overflowed, reopening stream.")
+                            break
+
+                        if data is None or data.size == 0:
+                            silent_reads += 1
+                        elif np.max(np.abs(data)) == 0:
+                            silent_reads += 1
+                        else:
+                            silent_reads = 0
+
+                        if silent_reads >= MAX_SILENT_READS:
+                            print("WARNING: mic input silent too long, reopening stream.")
+                            break
+
                         if recognizer.AcceptWaveform(data.tobytes()):
                             result = json.loads(recognizer.Result())
                             text = result.get("text", "").lower()
-                            print(f"DEBUG: Vosk recognized text: {text}")
+                            if text:
+                                print(f"DEBUG: Vosk recognized text: {text}")
                             if self.WAKE_WORD in text:
                                 self.loopcheck = 0
                                 if self.config['STT']['use_indicators']:
@@ -368,16 +400,28 @@ class STTManager:
                                 if self.wake_word_callback:
                                     self.wake_word_callback(wake_response)
                                 return True
+                            last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
-                            ptext = partial.get("partial", "")
-                            if ptext and ptext != last_partial:
-                                print(f"DEBUG: Vosk recognized text: {ptext}")
+                            ptext = partial.get("partial", "").strip().lower()
+                            if (
+                                ptext
+                                and ptext != last_partial
+                                and len(ptext) > 2
+                                and ptext != "huh"
+                            ):
+                                print(f"DEBUG: Vosk partial: {ptext}")
                                 last_partial = ptext
 
             except Exception as e:
                 print(f"ERROR: Wake word detection stream failed: {e}")
-                time.sleep(2)
+                self.mic_index = None
+                self._release_audio_input()
+                try:
+                    mic_index = self._get_input_device()
+                except Exception as dev_err:
+                    print(f"ERROR: Could not re-open mic: {dev_err}")
+                time.sleep(3)
 
         return False
 
