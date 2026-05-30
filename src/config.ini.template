@@ -34,6 +34,8 @@ max_empty_listen_attempts = 3
 # After wake/TTS: retry listen this many times if no speech, then Sleeping.
 stt_debug = true
 # [STT +X.XXs] timing logs for listen/whisper/LLM/TTS bottlenecks
+max_recording_frames = 100
+# Max mic frames per utterance (~9s at 44100/4000). Was 35 (~3s), too short for Korean.
 whisper_timeout_sec = 45
 # Max seconds for Faster-Whisper on Pi; prevents indefinite hang.
 wake_responses_file = character/TARS/wake_responses_en.txt

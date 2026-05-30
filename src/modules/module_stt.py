@@ -59,7 +59,9 @@ class STTManager:
         self._load_whisper_model()
         self.silence_threshold = 10  # Default value; updated dynamically
         self.MAX_SILENT_FRAMES = 100
-        self.MAX_RECORDING_FRAMES = 35 # 음성 인식 시간
+        self.MAX_RECORDING_FRAMES = int(
+            self.config['STT'].get('max_recording_frames', 100)
+        )
         self.LISTEN_SILENT_FRAMES = int(
             self.config['STT'].get('listen_silent_frames', 50)
         )
@@ -75,7 +77,7 @@ class STTManager:
         self.TARS_RESPONSES = self._load_wake_responses()
         self._load_vosk_model()
         self._measure_background_noise()
-        self.update_bar, self.clear_bar = self._init_progress_bar()
+        self._silence_bar_visible = False
         self.vadmethod = self.config['STT']['vad_method']
         self.stt_debug = str(
             self.config['STT'].get('stt_debug', 'true')
@@ -88,6 +90,7 @@ class STTManager:
     def _stt_debug(self, msg):
         if not self.stt_debug:
             return
+        self._clear_silence_bar(finish_line=True)
         elapsed = time.time() - self._stt_debug_t0
         print(f"[STT +{elapsed:6.2f}s] {msg}", flush=True)
 
@@ -168,21 +171,30 @@ class STTManager:
         return KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
 
 # Progress bar
-    def _init_progress_bar(self):
+    def _update_silence_bar(self, frames, max_frames):
         """In-place silence bar (same line, does not erase USER/TARS above)."""
         bar_length = 10
+        progress = int((frames / max_frames) * bar_length)
+        filled = "#" * progress
+        empty = "-" * (bar_length - progress)
+        bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
+        print(f"\r{bar}", end="", flush=True)
+        self._silence_bar_visible = True
 
-        def update_bar(frames, max_frames):
-            progress = int((frames / max_frames) * bar_length)
-            filled = "#" * progress
-            empty = "-" * (bar_length - progress)
-            bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
-            print(f"\r{bar}", end="", flush=True)
-
-        def clear_bar():
+    def _clear_silence_bar(self, finish_line=False):
+        if not self._silence_bar_visible:
+            return
+        if finish_line:
+            print(flush=True)
+        else:
             print("\r" + " " * 50 + "\r", end="", flush=True)
+        self._silence_bar_visible = False
 
-        return update_bar, clear_bar
+    def update_bar(self, frames, max_frames):
+        self._update_silence_bar(frames, max_frames)
+
+    def clear_bar(self):
+        self._clear_silence_bar(finish_line=False)
 
     def prepare_audio_data(self, data: np.ndarray) -> Optional[float]:
         """
@@ -214,7 +226,6 @@ class STTManager:
     def _is_silence_detected_rms(self, data, detected_speech, silent_frames):
         """RMS-based silence detection with visual progress bar"""
         try:
-            update_bar, clear_bar = self._init_progress_bar()
             self.DEBUG = False
             rms = self.prepare_audio_data(self.amplify_audio(data))
             self.silence_threshold_margin = self.silence_threshold * self.silence_margin
@@ -235,21 +246,21 @@ class STTManager:
                 if self.DEBUG:
                     queue_message(f"AUDIO: {rms:.2f}/{self.silence_threshold:.2f}/{self.silence_threshold_margin:.2f}")
                 
-                clear_bar()
+                self._clear_silence_bar()
             else:
                 silent_frames += 1
                 
                 if self.DEBUG:
                     queue_message(f"SILENT: {rms:.2f}/{self.silence_threshold:.2f}/{self.silence_threshold_margin:.2f}")
                 
-                update_bar(silent_frames, self.LISTEN_SILENT_FRAMES)
+                self._update_silence_bar(silent_frames, self.LISTEN_SILENT_FRAMES)
 
                 if silent_frames > self.LISTEN_SILENT_FRAMES:
                     self._stt_debug(
                         f"VAD: end-of-utterance silence "
                         f"frames={silent_frames}/{self.LISTEN_SILENT_FRAMES}"
                     )
-                    clear_bar()
+                    self._clear_silence_bar()
                     return True, detected_speech, silent_frames
 
             
@@ -504,7 +515,6 @@ class STTManager:
         detected_speech = False
         silent_frames = 0
         mic_index = self._get_input_device()
-        last_speech_log = time.time()
 
         self._stt_debug("whisper: opening InputStream")
         try:
@@ -528,12 +538,6 @@ class STTManager:
                         self._stt_debug("whisper: aborted (shutdown)")
                         return None
 
-                    if frame_i % 10 == 0:
-                        self._stt_debug(
-                            f"whisper: frame={frame_i} silent={silent_frames} "
-                            f"speech={detected_speech}"
-                        )
-
                     t_read = time.time()
                     data, overflowed = stream.read(4000)
                     read_ms = (time.time() - t_read) * 1000
@@ -546,11 +550,6 @@ class STTManager:
                     is_silence, detected_speech, silent_frames = self.voice_activity_detection_main(
                         data, detected_speech, silent_frames
                     )
-                    if detected_speech and time.time() - last_speech_log >= 1.0:
-                        self._stt_debug(
-                            f"whisper: recording speech… silent={silent_frames}"
-                        )
-                        last_speech_log = time.time()
 
                     if is_silence:
                         if not detected_speech:
