@@ -337,7 +337,7 @@ class STTManager:
         Reopens the mic stream only on errors — not on a fixed timer.
         """
         MAX_SILENT_READS = 80  # ~8s of dead frames before reopen
-        MAX_OVERFLOW_STREAK = 200  # reopen only after sustained xruns
+        MAX_OVERFLOW_STREAK = 200  # reopen only after sustained xruns (silent)
 
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
@@ -372,15 +372,8 @@ class STTManager:
                         data, overflowed = stream.read(4000)
                         if overflowed:
                             overflow_streak += 1
-                            if overflow_streak in (1, 50, 100, 150):
-                                print(
-                                    f"WARNING: wake mic overflow "
-                                    f"({overflow_streak}), continuing..."
-                                )
                             if overflow_streak >= MAX_OVERFLOW_STREAK:
-                                print("WARNING: too many overflows, reopening stream.")
                                 break
-                            # PortAudio still returns usable audio; keep listening.
                         else:
                             overflow_streak = 0
 
