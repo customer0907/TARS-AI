@@ -25,6 +25,7 @@ import wave
 import numpy as np
 import json
 import librosa
+import concurrent.futures
 from typing import Callable, Optional
 from vosk import SetLogLevel
 from modules.module_messageQue import queue_message
@@ -59,9 +60,24 @@ class STTManager:
         self.silence_threshold = 10  # Default value; updated dynamically
         self.MAX_SILENT_FRAMES = 100
         self.MAX_RECORDING_FRAMES = 35 # 음성 인식 시간
+        self.LISTEN_SILENT_FRAMES = int(
+            self.config['STT'].get('listen_silent_frames', 30)
+        )
+        self.WHISPER_TIMEOUT_SEC = int(
+            self.config['STT'].get('whisper_timeout_sec', 45)
+        )
+        self.mic_index = None
         self.WAKE_WORD = self.config['STT']['wake_word']
         self.silence_margin = 3.5
-        self.TARS_RESPONSES = [
+        self.TARS_RESPONSES = self._load_wake_responses()
+        self._load_vosk_model()
+        self._measure_background_noise()
+        self.update_bar, self.clear_bar = self._init_progress_bar()
+        self.vadmethod = self.config['STT']['vad_method']
+
+    def _load_wake_responses(self):
+        """Load wake-word TTS lines from config file; fall back to built-in English list."""
+        defaults = [
             "Yes? What do you need?",
             "Ready and listening.",
             "At your service.",
@@ -71,12 +87,26 @@ class STTManager:
             "Here. What do you require?",
             "Yes? I'm here.",
             "Standing by.",
-            "Online and awaiting your command."
+            "Online and awaiting your command.",
         ]
-        self._load_vosk_model()
-        self._measure_background_noise()
-        self.update_bar, self.clear_bar = self._init_progress_bar()
-        self.vadmethod = self.config['STT']['vad_method']
+        rel_path = self.config['STT'].get('wake_responses_file', '')
+        if not rel_path:
+            return defaults
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base_dir, rel_path)
+        if not os.path.isfile(path):
+            queue_message(f"WARNING: wake_responses_file not found ({path}), using defaults.")
+            return defaults
+        with open(path, encoding='utf-8') as f:
+            lines = [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith('#')
+            ]
+        if not lines:
+            queue_message(f"WARNING: wake_responses_file is empty ({path}), using defaults.")
+            return defaults
+        return lines
 
 #Main Thread Calls
     def start(self):
@@ -179,9 +209,9 @@ class STTManager:
                 if self.DEBUG:
                     queue_message(f"SILENT: {rms:.2f}/{self.silence_threshold:.2f}/{self.silence_threshold_margin:.2f}")
                 
-                update_bar(silent_frames, self.MAX_SILENT_FRAMES)
+                update_bar(silent_frames, self.LISTEN_SILENT_FRAMES)
 
-                if silent_frames > self.MAX_SILENT_FRAMES:
+                if silent_frames > self.LISTEN_SILENT_FRAMES:
                     clear_bar()
                     return True, detected_speech, silent_frames
 
@@ -298,9 +328,11 @@ class STTManager:
         print(f"TARS: Sleeping...")
 
         recognizer = KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
-        mic_index = self._get_default_input_device()
+        mic_index = self._get_input_device()
+        last_heartbeat = time.time()
+        last_partial = ""
 
-        while True:
+        while self.running and not self.shutdown_event.is_set():
             try:
                 with sd.InputStream(
                     samplerate=self.SAMPLE_RATE,
@@ -311,12 +343,15 @@ class STTManager:
                     device=mic_index
                 ) as stream:
                     print("InputStream opened successfully")
-                    while True:
-                        # 주기적으로 stream 리셋
+                    while self.running and not self.shutdown_event.is_set():
                         if time.time() - last_restart_time > WAKE_RESTART_INTERVAL:
                             print("INFO: Restarting mic input stream to prevent idle sleep.")
                             last_restart_time = time.time()
-                            break  # 내부 while 탈출 → with 블록 탈출 → stream 재시작
+                            break
+
+                        if time.time() - last_heartbeat > 60:
+                            print("DEBUG: Waiting for wake word...")
+                            last_heartbeat = time.time()
 
                         data, _ = stream.read(4000)
                         if recognizer.AcceptWaveform(data.tobytes()):
@@ -324,6 +359,7 @@ class STTManager:
                             text = result.get("text", "").lower()
                             print(f"DEBUG: Vosk recognized text: {text}")
                             if self.WAKE_WORD in text:
+                                self.loopcheck = 0
                                 if self.config['STT']['use_indicators']:
                                     self.play_beep(1200, 0.1, 44100, 0.8)  # wake tone
                                 wake_response = random.choice(self.TARS_RESPONSES)
@@ -332,10 +368,18 @@ class STTManager:
                                 if self.wake_word_callback:
                                     self.wake_word_callback(wake_response)
                                 return True
+                        else:
+                            partial = json.loads(recognizer.PartialResult())
+                            ptext = partial.get("partial", "")
+                            if ptext and ptext != last_partial:
+                                print(f"DEBUG: Vosk recognized text: {ptext}")
+                                last_partial = ptext
 
             except Exception as e:
                 print(f"ERROR: Wake word detection stream failed: {e}")
-                time.sleep(2)  # 장치 재시도 유예시간
+                time.sleep(2)
+
+        return False
 
 #Transcripe functions
     def _transcribe_utterance(self):
@@ -344,53 +388,77 @@ class STTManager:
         """
         print(f"STAT: Listening...")
         try:
-            # Map "whisper" to faster-whisper as well.
             processor = self.config["STT"].get("stt_processor", "vosk")
             if processor in ["whisper", "faster-whisper"]:
-                result = self._transcribe_with_faster_whisper()
+                self._transcribe_with_faster_whisper()
             elif processor == "silero":
-                result = self._transcribe_silero()
+                self._transcribe_silero()
             elif processor == "external":
-                result = self._transcribe_with_server()
+                self._transcribe_with_server()
             else:
-                result = self._transcribe_with_vosk()
+                self._transcribe_with_vosk()
                 print("transcribe_with_vosk() starts.")
-            
-            # Call post-utterance callback if utterance was detected recently, otherwise return to wake word detection
-            if self.post_utterance_callback and result:
-                if not hasattr(self, 'loopcheck'):
-                    self.loopcheck = 0 
-
-                self.loopcheck += 1
-                
-                self.post_utterance_callback()
-
         except Exception as e:
             print(f"ERROR: Utterance transcription failed: {e}")
+        finally:
+            self.clear_bar()
+
+        if not hasattr(self, 'loopcheck'):
+            self.loopcheck = 0
+
+        self.loopcheck += 1
+        if self.loopcheck > 10:
+            self.loopcheck = 0
+            return
+
+        if self.post_utterance_callback:
+            self.post_utterance_callback()
 
     def _transcribe_with_faster_whisper(self):
         """Transcribe audio using Faster-Whisper."""
         audio_buffer = BytesIO()
         detected_speech = False
         silent_frames = 0
-        max_silent_frames = self.MAX_SILENT_FRAMES
+        mic_index = self._get_input_device()
 
-        with sd.InputStream(
-            samplerate=self.SAMPLE_RATE, channels=1, dtype="int16"
-        ) as stream, wave.open(audio_buffer, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self.SAMPLE_RATE)
-            for _ in range(self.MAX_RECORDING_FRAMES):
-                data, _ = stream.read(4000)
-
-                is_silence, detected_speech, silent_frames = self.voice_activity_detection_main(data, detected_speech, silent_frames)
-                if is_silence:
-                    if not detected_speech:
+        try:
+            with sd.InputStream(
+                samplerate=self.SAMPLE_RATE,
+                channels=1,
+                dtype="int16",
+                device=mic_index,
+                blocksize=8000,
+                latency="high",
+            ) as stream, wave.open(audio_buffer, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.SAMPLE_RATE)
+                for _ in range(self.MAX_RECORDING_FRAMES):
+                    if not self.running or self.shutdown_event.is_set():
                         return None
-                    break
 
-                wf.writeframes(data.tobytes())
+                    data, _ = stream.read(4000)
+
+                    is_silence, detected_speech, silent_frames = self.voice_activity_detection_main(
+                        data, detected_speech, silent_frames
+                    )
+                    if is_silence:
+                        if not detected_speech:
+                            print("INFO: No speech detected during listen window.")
+                            return None
+                        break
+
+                    if not detected_speech and silent_frames >= self.LISTEN_SILENT_FRAMES:
+                        print("INFO: Listen timeout (silence), returning to wake mode.")
+                        return None
+
+                    wf.writeframes(data.tobytes())
+        finally:
+            self.clear_bar()
+
+        if not detected_speech:
+            print("INFO: No speech detected, returning to wake mode.")
+            return None
 
         audio_buffer.seek(0)
 
@@ -399,21 +467,35 @@ class STTManager:
             return None
 
         audio_data, sample_rate = sf.read(audio_buffer, dtype="float32")
-        
         audio_data = np.clip(audio_data, -1.0, 1.0)
         TARGET_SAMPLE_RATE = 16000
 
         if sample_rate != TARGET_SAMPLE_RATE:
             audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=TARGET_SAMPLE_RATE)
-        # Language is configurable via [STT] stt_language in config.ini.
-        # Defaults to "en" for backward compatibility. Set "ko" for Korean,
-        # or use "auto" to let faster-whisper detect the language per utterance.
+
         stt_lang = self.config.get("STT", {}).get("stt_language", "en")
         whisper_kwargs = {"temperature": 0.0, "beam_size": 1}
         if stt_lang and stt_lang.lower() != "auto":
             whisper_kwargs["language"] = stt_lang
-        segments, _ = self.faster_whisper_model.transcribe(audio_data, **whisper_kwargs)
-        segments = list(segments)
+
+        if self.faster_whisper_model is None:
+            queue_message("ERROR: Faster-Whisper model is not loaded.")
+            return None
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self._run_whisper_transcribe, audio_data, whisper_kwargs
+                )
+                segments = future.result(timeout=self.WHISPER_TIMEOUT_SEC)
+        except concurrent.futures.TimeoutError:
+            queue_message(
+                f"ERROR: Faster-Whisper timed out after {self.WHISPER_TIMEOUT_SEC}s."
+            )
+            return None
+        except Exception as e:
+            queue_message(f"ERROR: Faster-Whisper transcription failed: {e}")
+            return None
 
         transcribed_text = " ".join(segment.text for segment in segments).strip()
         if transcribed_text:
@@ -421,9 +503,13 @@ class STTManager:
             if self.utterance_callback:
                 self.utterance_callback(json.dumps(formatted_result))
             return formatted_result
-        else:
-            queue_message("ERROR: No transcription from Faster-Whisper.")
-            return None
+
+        print("INFO: No transcription from Faster-Whisper (empty result).")
+        return None
+
+    def _run_whisper_transcribe(self, audio_data, whisper_kwargs):
+        segments, _ = self.faster_whisper_model.transcribe(audio_data, **whisper_kwargs)
+        return list(segments)
 
     def _transcribe_with_vosk(self):
         """
@@ -434,7 +520,7 @@ class STTManager:
         silent_frames = 0
         max_silent_frames = 20  # Adjust based on desired duration (~1.25 seconds)
 
-        mic_index = self._get_default_input_device()
+        mic_index = self._get_input_device()
         with sd.InputStream(
             samplerate=self.SAMPLE_RATE,
             channels=1,
@@ -479,7 +565,7 @@ class STTManager:
             max_silent_frames = 3  # ~1.25 seconds of silence
 
             print(f"STAT: Starting audio recording...")
-            mic_index = self._get_default_input_device()
+            mic_index = self._get_input_device()
             with sd.InputStream(
                 samplerate=self.SAMPLE_RATE,
                 channels=1,
@@ -619,7 +705,7 @@ class STTManager:
             background_rms_values = []
             total_frames = 20  # 20 frames ~ 2-3 seconds
 
-            mic_index = self._get_default_input_device()
+            mic_index = self._get_input_device()
             with sd.InputStream(
                 samplerate=self.SAMPLE_RATE,
                 channels=1,
@@ -660,20 +746,27 @@ class STTManager:
         except Exception as e:
             print(f"ERROR: Failed to measure background noise: {e}")
 
-    def _get_default_input_device(self):
-        """
-        Automatically select the first available input device with audio input capabilities.
-        """
+    def _get_input_device(self):
+        """Return cached mic index; resolve once at first use."""
+        if self.mic_index is None:
+            self.mic_index = self._resolve_input_device()
+        return self.mic_index
+
+    def _resolve_input_device(self):
+        """Select the first available input device."""
         try:
             devices = sd.query_devices()
             for i, device in enumerate(devices):
-                if device['max_input_channels'] > 0:  # Device has input capability
+                if device['max_input_channels'] > 0:
                     print(f"Using input device: {device['name']} (Index: {i})")
                     return i
             raise ValueError("No suitable input devices found.")
         except Exception as e:
             print(f"Error detecting input device: {e}")
             raise
+
+    def _get_default_input_device(self):
+        return self._get_input_device()
 
     def _measure_background_noise(self):
         """

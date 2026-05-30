@@ -153,6 +153,11 @@ def load_config():
             "use_indicators": config.getboolean('STT', 'use_indicators'),
             "vad_method": config['STT']['vad_method'],
             "speechdelay": int(config['STT']['speechdelay']),
+            "wake_responses_file": config.get(
+                'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
+            ),
+            "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='30')),
+            "whisper_timeout_sec": int(config.get('STT', 'whisper_timeout_sec', fallback='45')),
         },
         "CHAR": {
             "character_card_path": config['CHAR']['character_card_path'],

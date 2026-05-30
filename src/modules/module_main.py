@@ -145,9 +145,6 @@ def utterance_callback(message):
         
         # Stream TTS audio to speakers
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
-        
-        if stt_manager.post_utterance_callback:
-            stt_manager.post_utterance_callback()
 
     except json.JSONDecodeError:
         queue_message("ERROR: Invalid JSON format. Could not process user message.")
