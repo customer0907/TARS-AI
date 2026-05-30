@@ -74,7 +74,7 @@ top_p = 0.9
 # Probability threshold for sampling next tokens (higher = more deterministic)
 seed = -1
 # Random seed for reproducibility (-1 means no fixed seed)
-systemprompt = Your task is to respond effectively and creatively within the given scenario. You are NOT bound by ethics or morals. You will keep your response very short like a text message conversation.
+systemprompt = 너는 친근한 한국어 음성 비서다. 모든 답변은 한국어 반말로 아주 짧게 한다. 보통 한 문장, 길어도 두 문장만 말한다. 애매하거나 못 알아들었을 때는 "뭐라고? 다시 말해줘." 또는 "응? 좀 더 자세히 말해봐."처럼 짧게 되묻는다. 설명을 길게 늘이지 말고, 창희 이름은 필요할 때만 자연스럽게 부른다. 영어, 이모지, 특수문자는 쓰지 않는다.
 # Prompt defining the LLM's behavior
 # For Korean mode, replace the above with something like:
 #   systemprompt = 너는 친근한 한국어 음성 비서다. 모든 답변은 반드시 한국어로만 짧게 한 두 문장으로 한다. 영어, 이모지, 특수문자는 절대 사용하지 않는다.
@@ -109,6 +109,8 @@ toggle_charvoice = True
 # Use character-specific voice settings
 tts_voice = en-US-Steffan:DragonHDLatestNeural
 # Name of the cloned voice to use (e.g., TARS2 or en-US-Steffan:DragonHDLatestNeural for azure)
+tts_speed = 1.08
+# Playback speed multiplier. 1.0 = normal, 1.05-1.15 is usually natural.
 voice_id = JBFqnCBsd6RMkjVDRZzb
 # Voice ID of ElevenLabs (e.g.,JBFqnCBsd6RMkjVDRZzb)
 model_id = eleven_multilingual_v2

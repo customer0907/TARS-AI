@@ -179,10 +179,23 @@ async def play_audio_chunks(text, config):
     """
     Plays audio chunks sequentially from the generate_tts_audio function.
     """
+    tts_speed = float(getattr(config, "tts_speed", 1.0) or 1.0)
+    if tts_speed <= 0:
+        tts_speed = 1.0
+
     async for audio_chunk in generate_tts_audio(text, config):
         try:
             # Read the audio chunk into a format playable by sounddevice
             data, samplerate = sf.read(audio_chunk, dtype='float32')
+            if abs(tts_speed - 1.0) > 0.01:
+                if data.ndim == 1:
+                    data = librosa.effects.time_stretch(data, rate=tts_speed)
+                else:
+                    channels = [
+                        librosa.effects.time_stretch(data[:, idx], rate=tts_speed)
+                        for idx in range(data.shape[1])
+                    ]
+                    data = np.stack(channels, axis=1)
             sd.play(data, samplerate)
             await asyncio.sleep(len(data) / samplerate)  # Wait for playback to finish
         except Exception as e:
