@@ -152,20 +152,13 @@ class STTManager:
 
 # Progress bar
     def _init_progress_bar(self):
-        """Initialize progress bar for silence tracking."""
-        bar_length = 10
+        """Progress bar disabled — ANSI line-clear was erasing USER/TARS log lines."""
 
         def update_bar(frames, max_frames):
-            progress = int((frames / max_frames) * bar_length)
-            filled = "#" * progress
-            empty = "-" * (bar_length - progress)
-            bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
-
-            # 한 줄 위로 올라가서 해당 줄만 클리어 후 출력
-            print("\033[F\033[K" + bar)
+            pass
 
         def clear_bar():
-            print("\033[F\033[K", end="", flush=True)
+            pass
 
         return update_bar, clear_bar
 

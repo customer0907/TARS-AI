@@ -110,7 +110,7 @@ def utterance_callback(message):
         
         #Print or stream the response
         #queue_message(f"USER: {message_dict['text']}")
-        queue_message(f"USER: {message_dict['text']}", stream=True) 
+        queue_message(f"USER: {message_dict['text']}")
 
         # Check for shutdown command
         if "shutdown pc" in message_dict['text'].lower():
@@ -139,7 +139,7 @@ def utterance_callback(message):
             pass
 
         # Stream the AI's reply
-        queue_message(f"TARS: {reply}", stream=True) 
+        queue_message(f"TARS: {reply}")
 
         # Strip emoji and other symbols, but KEEP letters/digits/punct of any script.
         # \w covers Unicode word chars (incl. Korean Hangul, CJK, accents...).
