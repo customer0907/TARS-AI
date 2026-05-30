@@ -313,9 +313,13 @@ class STTManager:
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
+                    delay = int(self.config['STT'].get('speechdelay', 20)) / 10.0
+                    if delay > 0:
+                        time.sleep(delay)
                     self.loopcheck = 0
                     while self.running and self.loopcheck < 10:
-                        self._transcribe_utterance()
+                        if not self._transcribe_utterance():
+                            break
                         self.loopcheck += 1
                     self.loopcheck = 0
         except Exception as e:
@@ -422,24 +426,28 @@ class STTManager:
     def _transcribe_utterance(self):
         """
         Process a user utterance after wake word detection.
+        Returns True if speech was transcribed and handled.
         """
         print(f"STAT: Listening...")
+        result = None
         try:
             processor = self.config["STT"].get("stt_processor", "vosk")
             if processor in ["whisper", "faster-whisper"]:
-                self._transcribe_with_faster_whisper()
+                result = self._transcribe_with_faster_whisper()
             elif processor == "silero":
-                self._transcribe_silero()
+                result = self._transcribe_silero()
             elif processor == "external":
-                self._transcribe_with_server()
+                result = self._transcribe_with_server()
             else:
-                self._transcribe_with_vosk()
+                result = self._transcribe_with_vosk()
                 print("transcribe_with_vosk() starts.")
         except Exception as e:
             print(f"ERROR: Utterance transcription failed: {e}")
         finally:
             self.clear_bar()
             self._release_audio_input()
+
+        return bool(result)
 
     def _transcribe_with_faster_whisper(self):
         """Transcribe audio using Faster-Whisper."""
@@ -472,12 +480,10 @@ class STTManager:
                     )
                     if is_silence:
                         if not detected_speech:
-                            print("INFO: No speech detected during listen window.")
                             return None
                         break
 
                     if not detected_speech and silent_frames >= self.LISTEN_SILENT_FRAMES:
-                        print("INFO: Listen timeout (silence), returning to wake mode.")
                         return None
 
                     wf.writeframes(data.tobytes())
@@ -485,7 +491,6 @@ class STTManager:
             self.clear_bar()
 
         if not detected_speech:
-            print("INFO: No speech detected, returning to wake mode.")
             return None
 
         audio_buffer.seek(0)
