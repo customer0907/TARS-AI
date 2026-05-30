@@ -65,6 +65,9 @@ class STTManager:
         self.LISTEN_SILENT_FRAMES = int(
             self.config['STT'].get('listen_silent_frames', 50)
         )
+        self.END_SPEECH_SILENT_FRAMES = int(
+            self.config['STT'].get('end_speech_silent_frames', 8)
+        )
         self.MAX_EMPTY_LISTEN_ATTEMPTS = int(
             self.config['STT'].get('max_empty_listen_attempts', 3)
         )
@@ -249,15 +252,30 @@ class STTManager:
                 self._clear_silence_bar()
             else:
                 silent_frames += 1
-                
+
                 if self.DEBUG:
                     queue_message(f"SILENT: {rms:.2f}/{self.silence_threshold:.2f}/{self.silence_threshold_margin:.2f}")
-                
-                self._update_silence_bar(silent_frames, self.LISTEN_SILENT_FRAMES)
 
-                if silent_frames > self.LISTEN_SILENT_FRAMES:
+                if detected_speech:
+                    bar_limit = self.END_SPEECH_SILENT_FRAMES
+                    end_speech = silent_frames > self.END_SPEECH_SILENT_FRAMES
+                else:
+                    bar_limit = self.LISTEN_SILENT_FRAMES
+                    end_speech = False
+
+                self._update_silence_bar(silent_frames, bar_limit)
+
+                if end_speech:
                     self._stt_debug(
                         f"VAD: end-of-utterance silence "
+                        f"frames={silent_frames}/{self.END_SPEECH_SILENT_FRAMES}"
+                    )
+                    self._clear_silence_bar()
+                    return True, detected_speech, silent_frames
+
+                if not detected_speech and silent_frames >= self.LISTEN_SILENT_FRAMES:
+                    self._stt_debug(
+                        f"VAD: idle silence "
                         f"frames={silent_frames}/{self.LISTEN_SILENT_FRAMES}"
                     )
                     self._clear_silence_bar()
@@ -531,7 +549,8 @@ class STTManager:
                 wf.setframerate(self.SAMPLE_RATE)
                 self._stt_debug(
                     f"whisper: recording max_frames={self.MAX_RECORDING_FRAMES} "
-                    f"silence_limit={self.LISTEN_SILENT_FRAMES}"
+                    f"idle_silence={self.LISTEN_SILENT_FRAMES} "
+                    f"end_speech_silence={self.END_SPEECH_SILENT_FRAMES}"
                 )
                 for frame_i in range(self.MAX_RECORDING_FRAMES):
                     if not self.running or self.shutdown_event.is_set():

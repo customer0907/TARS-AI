@@ -157,6 +157,9 @@ def load_config():
                 'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
             ),
             "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='50')),
+            "end_speech_silent_frames": int(
+                config.get('STT', 'end_speech_silent_frames', fallback='8')
+            ),
             "max_empty_listen_attempts": int(
                 config.get('STT', 'max_empty_listen_attempts', fallback='3')
             ),
