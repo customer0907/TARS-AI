@@ -22,6 +22,7 @@ from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
 from modules.module_tts import play_audio_chunks
+from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
 # === Constants and Globals ===
@@ -111,12 +112,36 @@ def utterance_callback(message):
             queue_message(f"SHUTDOWN: Shutting down the PC...")
             os.system('shutdown /s /t 0')
             return  # Exit function after issuing shutdown command
+
+        user_text = message_dict['text']
+        ha_cfg = CONFIG.get('HOME_ASSISTANT', {})
+        ha_skip_llm = str(ha_cfg.get('ha_skip_llm', 'true')).lower() in ('true', '1', 'yes')
+        if (
+            ha_cfg.get('enabled') == "True"
+            and ha_skip_llm
+            and map_prompt_to_ha_service(user_text)
+        ):
+            queue_message("TOOL: HA keyword match (skip LLM/TTS)")
+            t0 = time.time()
+            if stt_manager and stt_manager.stt_debug:
+                stt_manager._stt_debug("HA shortcut: skip LLM/TTS")
+            try:
+                send_prompt_to_homeassistant(user_text)
+                if stt_manager and stt_manager.stt_debug:
+                    stt_manager._stt_debug(f"HA shortcut done ({time.time() - t0:.2f}s)")
+            except Exception as e:
+                queue_message(f"ERROR: HA shortcut failed: {e}")
+            else:
+                if stt_manager:
+                    stt_manager._release_audio_input(pause=0.05)
+                return
+            # HA failed → fall through to LLM
         
         # Process the message using process_completion
         t0 = time.time()
         if stt_manager and stt_manager.stt_debug:
             stt_manager._stt_debug("LLM process_completion start")
-        reply = process_completion(message_dict['text'])
+        reply = process_completion(user_text)
         if stt_manager and stt_manager.stt_debug:
             stt_manager._stt_debug(f"LLM process_completion done ({time.time() - t0:.2f}s)")
         print(f"DEBUG: Generated reply = {reply}")

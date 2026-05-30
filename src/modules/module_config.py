@@ -222,6 +222,7 @@ def load_config():
         "HOME_ASSISTANT": {
             "enabled": config['HOME_ASSISTANT']['enabled'],
             "url": config['HOME_ASSISTANT']['url'],
+            "ha_skip_llm": config.get('HOME_ASSISTANT', 'ha_skip_llm', fallback='true'),
             "HA_TOKEN": os.getenv('HA_TOKEN'),
         },
         "DISCORD": {
