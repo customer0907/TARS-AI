@@ -152,13 +152,18 @@ class STTManager:
 
 # Progress bar
     def _init_progress_bar(self):
-        """Progress bar disabled — ANSI line-clear was erasing USER/TARS log lines."""
+        """In-place silence bar (same line, does not erase USER/TARS above)."""
+        bar_length = 10
 
         def update_bar(frames, max_frames):
-            pass
+            progress = int((frames / max_frames) * bar_length)
+            filled = "#" * progress
+            empty = "-" * (bar_length - progress)
+            bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
+            print(f"\r{bar}", end="", flush=True)
 
         def clear_bar():
-            pass
+            print("\r" + " " * 50 + "\r", end="", flush=True)
 
         return update_bar, clear_bar
 
