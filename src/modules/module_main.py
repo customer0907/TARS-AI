@@ -21,7 +21,7 @@ from modules.module_config import load_config
 from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
-from modules.module_tts import play_audio_chunks, play_audio_file, strip_elevenlabs_tags
+from modules.module_tts import play_audio_chunks, play_audio_file, strip_elevenlabs_tags, normalize_for_korean_tts
 from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
@@ -157,6 +157,8 @@ def utterance_callback(message):
         queue_message(f"TARS: {strip_elevenlabs_tags(reply)}")
 
         tts_text = reply
+        if CONFIG['CHAR'].get('language') == 'ko':
+            tts_text = normalize_for_korean_tts(tts_text)
         if CONFIG['TTS']['ttsoption'] != 'elevenlabs':
             tts_text = re.sub(
                 r'[^\w\s.,?!;:"\'\-。、，·…]', '', tts_text, flags=re.UNICODE

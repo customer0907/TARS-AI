@@ -50,6 +50,67 @@ def strip_elevenlabs_tags(text: str) -> str:
     cleaned = ELEVENLABS_AUDIO_TAGS.sub(' ', text)
     return re.sub(r'\s+', ' ', cleaned).strip()
 
+
+_HOUR_KO = (None, '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두')
+_SINO = ('', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구')
+
+
+def _ko_sino_number(value: int) -> str:
+    if value == 0:
+        return '영'
+    if value < 10:
+        return _SINO[value]
+    if value < 100:
+        tens, ones = divmod(value, 10)
+        text = '십' if tens == 1 else _SINO[tens] + '십'
+        if ones:
+            text += _SINO[ones]
+        return text
+    if value < 1000:
+        hundreds, rest = divmod(value, 100)
+        text = _SINO[hundreds] + '백' if hundreds > 1 else '백'
+        if rest:
+            text += _ko_sino_number(rest)
+        return text
+    return str(value)
+
+
+def _ko_minute(minute: int) -> str:
+    if minute == 0:
+        return ''
+    return _ko_sino_number(minute) + '분'
+
+
+def _ko_spoken_time(hour: int, minute: int) -> str:
+    period = '오전' if hour < 12 else '오후'
+    hour12 = hour % 12 or 12
+    spoken = f"{period} {_HOUR_KO[hour12]}시"
+    if minute:
+        spoken = f"{spoken} {_ko_minute(minute)}"
+    return spoken
+
+
+def normalize_for_korean_tts(text: str) -> str:
+    """Convert numeric time/temp/percent in display text to spoken Korean for TTS only."""
+    if not text:
+        return text
+
+    def replace_time_hm(match):
+        return _ko_spoken_time(int(match.group(1)), int(match.group(2)))
+
+    def replace_time_colon(match):
+        return _ko_spoken_time(int(match.group(1)), int(match.group(2)))
+
+    def replace_hour_only(match):
+        return _ko_spoken_time(int(match.group(1)), 0)
+
+    text = re.sub(r'(\d{1,2})시\s*(\d{1,2})분', replace_time_hm, text)
+    text = re.sub(r'(?<!\d)(\d{1,2}):(\d{2})(?!\d)', replace_time_colon, text)
+    text = re.sub(r'(\d{1,2})시(?![\d분])', replace_hour_only, text)
+    text = re.sub(r'(\d+)도\b', lambda m: _ko_sino_number(int(m.group(1))) + '도', text)
+    text = re.sub(r'(\d+)\s*%', lambda m: _ko_sino_number(int(m.group(1))) + '퍼센트', text)
+    return text
+
 def update_tts_settings(ttsurl):
     """
     Updates TTS settings using a POST request to the specified server.

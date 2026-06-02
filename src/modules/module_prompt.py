@@ -9,37 +9,6 @@ import os
 from modules.module_engine import check_for_module
 from modules.module_messageQue import queue_message
 
-_HOUR_KO = (None, '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두')
-_SINO = ('', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구')
-
-
-def _ko_minute(minute: int) -> str:
-    if minute == 0:
-        return ''
-    tens, ones = divmod(minute, 10)
-    text = ''
-    if tens == 1:
-        text = '십'
-    elif tens > 1:
-        text = _SINO[tens] + '십'
-    if ones:
-        text += _SINO[ones]
-    return text + '분'
-
-
-def format_korean_datetime(now: datetime) -> str:
-    period = '오전' if now.hour < 12 else '오후'
-    hour12 = now.hour % 12 or 12
-    spoken_time = f"{period} {_HOUR_KO[hour12]}시"
-    minute_text = _ko_minute(now.minute)
-    if minute_text:
-        spoken_time = f"{spoken_time} {minute_text}"
-    return (
-        f"현재 날짜: {now.year}년 {now.month}월 {now.day}일\n"
-        f"현재 시각: {spoken_time}\n"
-    )
-
-
 def build_prompt(user_prompt, character_manager, memory_manager, config, debug=False):
     """
     Build a dynamically optimized prompt for the LLM backend.
@@ -55,14 +24,12 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
     - str: The formatted prompt for the LLM backend.
     """
     now = datetime.now()
-    language = config['CHAR'].get('language', 'en')
-    if language == 'ko':
-        dtg = format_korean_datetime(now)
-    else:
-        dtg = f"Current Date: {now.strftime('%m/%d/%Y')}\nCurrent Time: {now.strftime('%H:%M:%S')}\n"
+    dtg = f"Current Date: {now.strftime('%m/%d/%Y')}\nCurrent Time: {now.strftime('%H:%M:%S')}\n"
     user_name = config['CHAR']['user_name']
     char_name = character_manager.char_name
     functioncall = check_for_module(user_prompt)
+
+    language = config['CHAR'].get('language', 'en')
     user_details = config['CHAR'].get('user_details', '')
 
     # ko mode: config.ini systemprompt/instructionprompt only (no JSON card duplication).
