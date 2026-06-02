@@ -11,6 +11,7 @@ Handles TTS functionality to convert text into audio using:
 """
 
 # === Standard Libraries ===
+import re
 import requests
 import os 
 from datetime import datetime
@@ -33,6 +34,21 @@ try:
 except Exception:
     text_to_speech_with_pipelining_melotts = None
 from modules.module_messageQue import queue_message
+
+# ElevenLabs v3 audio tags — stripped for console, kept for TTS synthesis.
+ELEVENLABS_AUDIO_TAGS = re.compile(
+    r'\s*\[(?:laughs harder|laughs|sighs|whispers|softly|surprised|'
+    r'excited|curious|sarcastic)\]\s*',
+    re.IGNORECASE,
+)
+
+
+def strip_elevenlabs_tags(text: str) -> str:
+    """Remove ElevenLabs audio tags from text shown to the user."""
+    if not text:
+        return text
+    cleaned = ELEVENLABS_AUDIO_TAGS.sub(' ', text)
+    return re.sub(r'\s+', ' ', cleaned).strip()
 
 def update_tts_settings(ttsurl):
     """

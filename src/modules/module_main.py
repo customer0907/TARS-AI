@@ -21,7 +21,7 @@ from modules.module_config import load_config
 from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
-from modules.module_tts import play_audio_chunks, play_audio_file
+from modules.module_tts import play_audio_chunks, play_audio_file, strip_elevenlabs_tags
 from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
@@ -154,7 +154,7 @@ def utterance_callback(message):
         if thoughts:
             pass
 
-        queue_message(f"TARS: {reply}")
+        queue_message(f"TARS: {strip_elevenlabs_tags(reply)}")
 
         tts_text = reply
         if CONFIG['TTS']['ttsoption'] != 'elevenlabs':
