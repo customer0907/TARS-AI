@@ -60,7 +60,8 @@ class MemoryManager:
                 queue_message(f"LOAD: Memory loaded successfully")
         else:
             queue_message(f"LOAD: No memory DB found. Creating new one: {self.memory_db_path}")
-            self.hyper_db.add_document({"text": f'{self.char_name}: {self.char_greeting}'})
+            if self.char_greeting and self.char_greeting.strip():
+                self.hyper_db.add_document({"text": f'{self.char_name}: {self.char_greeting}'})
             self.hyper_db.save(self.memory_db_path)
 
     def write_longterm_memory(self, user_input: str, bot_response: str):

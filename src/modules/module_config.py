@@ -171,6 +171,9 @@ def load_config():
             "wake_responses_file": _lang_get(
                 'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
             ),
+            "wake_prerecorded": _lang_get('STT', 'wake_prerecorded', fallback='false'),
+            "wake_audio_dir": _lang_get('STT', 'wake_audio_dir', fallback=''),
+            "wake_audio_by_index": _lang_get('STT', 'wake_audio_by_index', fallback='false'),
             "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='50')),
             "end_speech_silent_frames": int(
                 config.get('STT', 'end_speech_silent_frames', fallback='8')

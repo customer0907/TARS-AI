@@ -74,10 +74,12 @@ def _prepare_request_data(llm_backend, prompt):
     """
     if llm_backend == "openai":
         url = f"{CONFIG['LLM']['base_url']}/v1/chat/completions"
+        # build_prompt() already embeds System/Instruction/Character in `prompt`.
+        # A separate system role with systemprompt alone made Gemini ignore Character
+        # Details and fall back to generic "I'm an AI" refusals.
         data = {
             "model": CONFIG['LLM']['openai_model'],
             "messages": [
-                {"role": "system", "content": CONFIG['LLM']['systemprompt']},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": CONFIG['LLM']['max_tokens'],
@@ -89,7 +91,6 @@ def _prepare_request_data(llm_backend, prompt):
         data = {
             "model": CONFIG['LLM']['openai_model'],
             "messages": [
-                {"role": "system", "content": CONFIG['LLM']['systemprompt']},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": CONFIG['LLM']['max_tokens'],

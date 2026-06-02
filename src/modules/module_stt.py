@@ -75,8 +75,7 @@ class STTManager:
             self.config['STT'].get('whisper_timeout_sec', 45)
         )
         self.mic_index = None
-        self.WAKE_WORD = self.config['STT']['wake_word']
-        self.silence_margin = 3.5
+        self.WAKE_WORDS = self._parse_wake_words(self.config['STT']['wake_word'])
         self.TARS_RESPONSES = self._load_wake_responses()
         self._load_vosk_model()
         self._measure_background_noise()
@@ -97,38 +96,189 @@ class STTManager:
         elapsed = time.time() - self._stt_debug_t0
         print(f"[STT +{elapsed:6.2f}s] {msg}", flush=True)
 
+    def _parse_wake_words(self, wake_raw):
+        """Comma-separated wake phrases, e.g. amy,yooni,hey tar."""
+        if not wake_raw:
+            return []
+        return [
+            w.strip().lower()
+            for w in wake_raw.replace('，', ',').split(',')
+            if w.strip()
+        ]
+
+    def _text_audio_name_candidates(self, text):
+        """Filename stems to search for a wake line's audio clip."""
+        raw = text.strip()
+        no_punct = raw.replace('?', '').replace('~', '').replace('!', '').strip()
+        seen = set()
+        candidates = []
+        for value in (raw, no_punct, no_punct.replace(' ', '_'), no_punct.replace(' ', '')):
+            if value and value not in seen:
+                seen.add(value)
+                candidates.append(value)
+        return candidates
+
+    def _resolve_audio_file(self, base_dir, audio_dir, filename):
+        if not filename:
+            return None
+        filename = filename.strip().replace('/', os.path.sep)
+        if os.path.isabs(filename):
+            return filename if os.path.isfile(filename) else None
+        search_roots = []
+        if audio_dir:
+            search_roots.append(audio_dir)
+        search_roots.append(base_dir)
+        for root in search_roots:
+            candidate = os.path.join(root, filename)
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def _find_audio_by_text(self, audio_dir, text):
+        if not audio_dir or not os.path.isdir(audio_dir):
+            return None
+        for stem in self._text_audio_name_candidates(text):
+            for ext in ('mp3', 'wav', 'ogg', 'm4a'):
+                candidate = os.path.join(audio_dir, f"{stem}.{ext}")
+                if os.path.isfile(candidate):
+                    return candidate
+        return None
+
+    def _find_audio_by_index(self, audio_dir, idx):
+        if not audio_dir or not os.path.isdir(audio_dir):
+            return None
+        for ext in ('mp3', 'wav', 'ogg', 'm4a'):
+            for name in (f"{idx + 1:02d}.{ext}", f"{idx + 1}.{ext}"):
+                candidate = os.path.join(audio_dir, name)
+                if os.path.isfile(candidate):
+                    return candidate
+        return None
+
+    def _load_wake_manifest(self, audio_dir):
+        """Optional manifest.json: explicit text -> audio pairing (no index guessing)."""
+        if not audio_dir:
+            return {}
+        path = os.path.join(audio_dir, 'manifest.json')
+        if not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            queue_message(f"WARNING: wake manifest invalid ({path}): {e}")
+            return {}
+
+        mapping = {}
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                text = (item.get('text') or '').strip()
+                audio = item.get('audio') or item.get('file')
+                if text and audio:
+                    mapping[text] = str(audio).strip()
+        elif isinstance(data, dict):
+            for text, audio in data.items():
+                text = str(text).strip()
+                if text and audio:
+                    mapping[text] = str(audio).strip()
+        return mapping
+
     def _load_wake_responses(self):
-        """Load wake-word TTS lines from config file; fall back to built-in English list."""
+        """Load wake lines; each entry keeps text and its own audio_path in sync."""
         defaults = [
-            "Yes? What do you need?",
-            "Ready and listening.",
-            "At your service.",
-            "Go ahead.",
-            "What can I do for you?",
-            "Listening. What's up?",
-            "Here. What do you require?",
-            "Yes? I'm here.",
-            "Standing by.",
-            "Online and awaiting your command.",
+            {"text": "Yes? What do you need?", "audio_path": None},
+            {"text": "Ready and listening.", "audio_path": None},
+            {"text": "At your service.", "audio_path": None},
         ]
         rel_path = self.config['STT'].get('wake_responses_file', '')
         if not rel_path:
             return defaults
+
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path = os.path.join(base_dir, rel_path)
         if not os.path.isfile(path):
             queue_message(f"WARNING: wake_responses_file not found ({path}), using defaults.")
             return defaults
+
         with open(path, encoding='utf-8') as f:
-            lines = [
+            raw_lines = [
                 line.strip()
                 for line in f
                 if line.strip() and not line.strip().startswith('#')
             ]
-        if not lines:
+        if not raw_lines:
             queue_message(f"WARNING: wake_responses_file is empty ({path}), using defaults.")
             return defaults
-        return lines
+
+        prerecorded = str(
+            self.config['STT'].get('wake_prerecorded', 'false')
+        ).lower() in ('true', '1', 'yes')
+        audio_dir_rel = self.config['STT'].get('wake_audio_dir', '')
+        audio_dir = (
+            os.path.join(base_dir, audio_dir_rel.replace('/', os.path.sep))
+            if audio_dir_rel else None
+        )
+        use_index = str(
+            self.config['STT'].get('wake_audio_by_index', 'false')
+        ).lower() in ('true', '1', 'yes')
+        manifest = self._load_wake_manifest(audio_dir)
+
+        entries = []
+        for idx, raw in enumerate(raw_lines):
+            text = raw
+            audio_spec = None
+            if '|' in raw:
+                text, audio_spec = raw.split('|', 1)
+                text = text.strip()
+                audio_spec = audio_spec.strip()
+
+            audio_path = None
+            if prerecorded:
+                if text in manifest:
+                    audio_path = self._resolve_audio_file(
+                        base_dir, audio_dir, manifest[text]
+                    )
+                if not audio_path and audio_spec:
+                    audio_path = self._resolve_audio_file(
+                        base_dir, audio_dir, audio_spec
+                    )
+                if not audio_path:
+                    audio_path = self._find_audio_by_text(audio_dir, text)
+                if not audio_path and use_index:
+                    audio_path = self._find_audio_by_index(audio_dir, idx)
+
+            entries.append({"text": text, "audio_path": audio_path})
+
+        if prerecorded:
+            with_audio = sum(1 for e in entries if e['audio_path'])
+            queue_message(
+                f"LOAD: Wake responses={len(entries)} paired audio={with_audio} "
+                f"dir={audio_dir_rel or '(none)'}"
+            )
+            for entry in entries:
+                audio_label = (
+                    os.path.basename(entry['audio_path'])
+                    if entry['audio_path'] else 'MISSING'
+                )
+                queue_message(f"LOAD: wake '{entry['text']}' -> {audio_label}")
+
+        return entries
+
+    def _pick_wake_response(self):
+        """Random wake entry; pre-recorded mode only picks fully paired entries."""
+        pool = self.TARS_RESPONSES
+        prerecorded = str(
+            self.config['STT'].get('wake_prerecorded', 'false')
+        ).lower() in ('true', '1', 'yes')
+        if prerecorded:
+            paired = [e for e in pool if e.get('text') and e.get('audio_path')]
+            if paired:
+                return random.choice(paired)
+            queue_message(
+                "WARNING: wake_prerecorded=true but no text+audio pairs; falling back to TTS."
+            )
+        return random.choice(pool)
 
 #Main Thread Calls
     def start(self):
@@ -463,10 +613,10 @@ class STTManager:
                             text = result.get("text", "").lower()
                             if text:
                                 print(f"DEBUG: Vosk recognized text: {text}")
-                            if self.WAKE_WORD in text:
+                            if self.WAKE_WORDS and any(w in text for w in self.WAKE_WORDS):
                                 if self.config['STT']['use_indicators']:
                                     self.play_beep(1200, 0.1, 44100, 0.8)
-                                wake_response = random.choice(self.TARS_RESPONSES)
+                                wake_response = self._pick_wake_response()
                                 break
                             last_partial = ""
                         else:
@@ -487,13 +637,18 @@ class STTManager:
                 time.sleep(2)
 
         if wake_response:
-            print(f"TARS: {wake_response}")
-            self._stt_debug("wake TTS start")
+            label = wake_response.get('text', wake_response) if isinstance(wake_response, dict) else wake_response
+            audio_path = wake_response.get('audio_path') if isinstance(wake_response, dict) else None
+            print(f"TARS: {label}", flush=True)
+            if audio_path:
+                self._stt_debug(f"wake play text='{label}' file={os.path.basename(audio_path)}")
+            else:
+                self._stt_debug(f"wake TTS text='{label}'")
             self._release_audio_input(pause=0.05)
             if self.wake_word_callback:
                 t0 = time.time()
                 self.wake_word_callback(wake_response)
-                self._stt_debug(f"wake TTS done ({time.time() - t0:.2f}s)")
+                self._stt_debug(f"wake audio done ({time.time() - t0:.2f}s)")
             return True
 
         return False

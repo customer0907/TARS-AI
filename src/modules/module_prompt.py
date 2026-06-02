@@ -29,23 +29,36 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
     char_name = character_manager.char_name
     functioncall = check_for_module(user_prompt)
 
-    # Construct persona traits
-    persona_traits = "\n".join(
-        [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
-    )
+    language = config['CHAR'].get('language', 'en')
+    user_details = config['CHAR'].get('user_details', '')
 
-    
-    # Build the base prompt
-    base_prompt = (
-        f"System: {config['LLM']['systemprompt']}\n\n"
-        f"### Instruction:\n{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
-        f"### Interaction Context:\n---\n"
-        f"User: {user_name}\n"
-        f"Character: {char_name}\n"
-        f"{dtg}\n---\n\n"
-        f"### Character Details:\n---\n{character_manager.character_card}\n---\n\n"
-        f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
-    )
+    # ko mode: config.ini systemprompt/instructionprompt only (no JSON card duplication).
+    if language == 'ko':
+        base_prompt = (
+            f"System: {config['LLM']['systemprompt']}\n\n"
+            f"### Instruction:\n"
+            f"{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
+            f"### Interaction Context:\n---\n"
+            f"User: {user_name}\n"
+            f"Character: {char_name}\n"
+            f"{user_details}\n"
+            f"{dtg}\n---\n\n"
+        )
+    else:
+        persona_traits = "\n".join(
+            [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
+        )
+        base_prompt = (
+            f"System: {config['LLM']['systemprompt']}\n\n"
+            f"### Instruction:\n"
+            f"{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
+            f"### Interaction Context:\n---\n"
+            f"User: {user_name}\n"
+            f"Character: {char_name}\n"
+            f"{dtg}\n---\n\n"
+            f"### Character Details:\n---\n{character_manager.character_card}\n---\n\n"
+            f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
+        )
 
     # Dynamically append memory and examples
     final_prompt = append_memory_and_examples(
@@ -121,8 +134,12 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
         available_tokens -= memory_length
         #queue_message(f"Tokens after short term {available_tokens}")
 
-    # Add example dialog only if there's space remaining
-    if available_tokens > 0 and character_manager.example_dialogue:
+    # Add example dialog only if there's space remaining (English roleplay cards only)
+    use_examples = (
+        config['CHAR'].get('language', 'en') != 'ko'
+        and character_manager.example_dialogue
+    )
+    if available_tokens > 0 and use_examples:
         example_length = memory_manager.token_count(character_manager.example_dialogue).get('length', 0)
         if example_length <= available_tokens:
             example_dialog = f"### Example Dialog:\n{character_manager.example_dialogue}\n---\n"

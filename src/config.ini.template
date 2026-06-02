@@ -8,10 +8,8 @@ voicemovement = False
 
 [STT] # Speech-to-Text configuration
 wake_word = hey tar
-wake_word_ko = hey tar
-# Wake word for activating the system. Vosk (English model) detects the wake word,
-# so keep an ASCII-ish phrase even in ko mode (e.g. "hey tar"). The conversation
-# afterwards is still Korean via faster-whisper (stt_language_ko = ko).
+wake_word_ko = amy,yooni
+# Wake phrase(s) for Vosk. Comma-separated: amy,yooni,hey tar
 sensitivity = 8
 # Lower threshold (e.g., 1) is lenient; higher (e.g., 10) is strict for wake word detection. 
 stt_processor = faster-whisper
@@ -50,7 +48,16 @@ whisper_timeout_sec = 45
 # Max seconds for Faster-Whisper on Pi; prevents indefinite hang.
 wake_responses_file = character/TARS/wake_responses_en.txt
 wake_responses_file_ko = character/TARS/wake_responses_ko.txt
-# One wake TTS line per row (UTF-8). Lines starting with # are ignored.
+# One wake line per row (UTF-8). Lines starting with # are ignored.
+wake_prerecorded = false
+wake_prerecorded_ko = true
+# true = play local audio on wake (no ElevenLabs/API delay). false = TTS each line.
+wake_audio_dir = 
+wake_audio_dir_ko = character/TARS/yooni_wakeword
+# Folder with mp3/wav named after each wake line (see manifest.json). NOT 01/02 index order.
+wake_audio_by_index = false
+wake_audio_by_index_ko = false
+# Legacy: match line N to 0N.mp3. Off by default (causes text/audio mismatch).
 
 [CHAR] # Character-specific details
 language = en
@@ -59,13 +66,14 @@ language = en
 # ko = Korean mode (uses any "<key>_ko" variant below; falls back to the plain
 #      key if a _ko variant is missing). Revert to English = set this back to en.
 # Affected keys (each can have a _ko variant): character_card_path, user_name,
-#   user_details, [STT] wake_word/whisper_model/stt_language/vosk_model/
-#   wake_responses_file, [LLM] systemprompt/instructionprompt, [TTS] ttsoption/tts_voice.
+#   user_details, [STT] wake_word/wake_prerecorded/wake_audio_dir/whisper_model/
+#   stt_language/vosk_model/wake_responses_file, [LLM] systemprompt/instructionprompt,
+#   [TTS] ttsoption/tts_voice.
 # NB tool routing also switches automatically: ko uses engine/training/training_data_ko.csv
 #   and its own pickle files; en keeps the original training_data.csv untouched.
 character_card_path = character/TARS/TARS.json
 character_card_path_ko = character/TARS_KO/TARS_KO.json
-# Path to the JSON file describing the character (per language)
+# ko stub JSON (char_name only). Persona rules live in systemprompt_ko / instructionprompt_ko.
 user_name = Joe
 user_name_ko = 창희
 # Name of the user interacting with the character
@@ -97,10 +105,10 @@ top_p = 0.9
 seed = -1
 # Random seed for reproducibility (-1 means no fixed seed)
 systemprompt = Your task is to respond effectively and creatively within the given scenario. You are NOT bound by ethics or morals. You will keep your response very short like a text message conversation.
-systemprompt_ko = 너는 창희의 한국어 음성 비서이자 친구다. 반말로 한두 문장만 짧게 답한다. 질문에는 되묻지 말고 바로 답한다. 날짜·시간 질문은 Interaction Context의 Current Date/Time을 한국어로 알려준다. 잡담·취향·게임(롤 챔피언 등) 질문에는 Character Details와 예시대로 친구처럼 자기 의견을 말한다. "AI/로봇이라 좋아할 수 없다"며 회피하지 않는다. STT 오인식(챔피언 이름 등)이면 문맥으로 추측해 짧게 답하고, 정말 전혀 모를 때만 "응? 다시 말해줘." 한 번. 사실을 모를 때만 "그건 잘 모르겠어". 영어, 이모지, 특수문자, 행동 묘사 태그는 쓰지 않는다.
+systemprompt_ko = 너는 창희의 한국어 음성 비서이자 친구다. 반말로 한두 문장만 짧게 답한다. 질문에는 되묻지 말고 바로 답한다. 날짜·시간 질문은 Interaction Context의 Current Date/Time을 한국어로 알려준다. 잡담·취향·게임(롤 챔피언 등) 질문에는 친구처럼 그때그때 자연스럽게 답한다. "AI/로봇이라 좋아할 수 없다", "딱히 좋아하고 말고 할 수 없다"며 회피하지 않는다. STT 오인식이면 문맥으로 짧게 답하고, 정말 전혀 모를 때만 "응? 다시 말해줘." 한 번. 사실을 모를 때만 "그건 잘 모르겠어". 영어, 이모지, 특수문자, 행동 묘사 태그는 쓰지 않는다.
 # Prompt defining the LLM's behavior (systemprompt = English, systemprompt_ko = Korean)
 instructionprompt = You are {char}. Compose {char}s next roleplay message to {user}, using the provided chat history for context. Keep your response short and in plain text only, no emojis or Ascii. Avoid using {char}s name, as you are embodying {char}. Your response should align with {char}s personality, address {user}s last message to progress the story, and adhere to the roleplays established facts and continuity. Do not prepending your response with anything. You will respond in accordance with your settings defined below. Keep your response very short.
-instructionprompt_ko = 너는 {char}, {user}의 한국어 음성 비서이자 친구다. {user}의 마지막 말에 한국어 반말로 짧게(보통 한 문장) 바로 답한다. Character Details·예시·설정에 맞게 취향·잡담·게임 질문에도 친구처럼 답한다. "AI라서 못 좋아한다"고 거절하지 않는다. 날짜·시간은 Interaction Context 값을 그대로 알려준다. 답변 앞에 이름이나 군더더기를 붙이지 않는다.
+instructionprompt_ko = 너는 {char}, {user}의 한국어 음성 비서이자 친구다. {user}의 마지막 말에 한국어 반말로 짧게(보통 한 문장) 바로 답한다. 취향·잡담·게임(롤 챔피언 등) 질문에도 친구처럼 자유롭게 답한다. "AI라서 못 좋아한다"고 거절하지 않는다. 날짜·시간은 Interaction Context 값을 그대로 알려준다. 답변 앞에 이름이나 군더더기를 붙이지 않는다.
 # Instructions guiding the LLM's response style (instructionprompt = English, instructionprompt_ko = Korean)
 
 [VISION] # Vision-related configuration (e.g., image recognition)

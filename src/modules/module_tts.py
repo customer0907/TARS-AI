@@ -189,3 +189,13 @@ async def play_audio_chunks(text, config):
         except Exception as e:
             queue_message(f"ERROR: Failed to play audio chunk: {e}")
 
+
+def play_audio_file(path):
+    """Play a local audio file (wake clips). No network/TTS API call."""
+    try:
+        data, samplerate = sf.read(path, dtype='float32')
+        sd.play(data, samplerate)
+        sd.wait()
+    except Exception as e:
+        queue_message(f"ERROR: Failed to play audio file {path}: {e}")
+

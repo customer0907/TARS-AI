@@ -21,7 +21,7 @@ from modules.module_config import load_config
 from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
-from modules.module_tts import play_audio_chunks
+from modules.module_tts import play_audio_chunks, play_audio_file
 from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
@@ -85,8 +85,19 @@ def process_discord_message_callback(user_message):
 
 def wake_word_callback(wake_response):
     """
-    Play initial response when wake word is detected (runs in a background thread).
+    Play wake response immediately. Uses pre-recorded audio when available (no API latency).
     """
+    if isinstance(wake_response, dict):
+        text = wake_response.get('text', '')
+        audio_path = wake_response.get('audio_path')
+        if audio_path and os.path.isfile(audio_path):
+            play_audio_file(audio_path)
+            return
+        if text:
+            asyncio.run(play_audio_chunks(text, CONFIG['TTS']['ttsoption']))
+            return
+        return
+
     asyncio.run(play_audio_chunks(wake_response, CONFIG['TTS']['ttsoption']))
 
 def utterance_callback(message):
