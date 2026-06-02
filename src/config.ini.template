@@ -194,6 +194,8 @@ enabled = True
 
 [RAG]
 # RAG (Retrieval Augmented Generation) settings
+# Memory save/retrieve: only user-stated facts (e.g. "나는 피자 좋아해").
+# Bot-opinion casual chat (game recs, "너 챔피언 누구 좋아해") is not stored or recalled.
 strategy = hybrid
 # Options: naive (vector-only), hybrid (vector + BM25)
 top_k = 5
