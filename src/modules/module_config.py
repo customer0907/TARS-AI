@@ -106,9 +106,24 @@ def load_config():
     # === Language toggle (en/ko) ===
     # Master switch in [CHAR]. Language-specific keys use a "<key>_<language>" suffix.
     # _lang_get() picks the suffixed key if present, else the plain key, else fallback.
-    # This means an existing config without any _ko keys still behaves exactly as before
-    # (defaults to English), so reverting is just: language = en
-    language = config.get('CHAR', 'language', fallback='en').strip().lower()
+    DEFAULT_CHARACTER_PATH = {
+        'en': 'character/TARS/TARS.json',
+        'ko': 'character/TARS_KO/TARS_KO.json',
+    }
+
+    language = config.get('CHAR', 'language', fallback='').strip().lower()
+    if language not in ('en', 'ko'):
+        # Infer ko when user migrated to *_ko keys only (common Pi setup).
+        has_ko_keys = (
+            config.has_option('CHAR', 'character_card_path_ko')
+            or config.has_option('LLM', 'systemprompt_ko')
+        )
+        has_plain_char = config.has_option('CHAR', 'character_card_path')
+        language = 'ko' if has_ko_keys and not has_plain_char else 'en'
+        if language == 'ko':
+            queue_message(
+                "INFO: [CHAR] language not set; inferred ko from *_ko config keys."
+            )
 
     def _lang_get(section, key, fallback=None):
         lang_key = f"{key}_{language}"
@@ -119,8 +134,17 @@ def load_config():
         return fallback
 
     # Parse the persona.ini file
-    character_path = _lang_get("CHAR", "character_card_path")  # Get full path (language-aware)
-    character_name = os.path.splitext(os.path.basename(character_path))[0]  # Extract filename without extension
+    character_path = _lang_get(
+        "CHAR",
+        "character_card_path",
+        fallback=DEFAULT_CHARACTER_PATH.get(language, DEFAULT_CHARACTER_PATH['en']),
+    )
+    if not character_path:
+        character_path = DEFAULT_CHARACTER_PATH.get(language, DEFAULT_CHARACTER_PATH['en'])
+        queue_message(
+            f"WARNING: character_card_path missing; using default {character_path}"
+        )
+    character_name = os.path.splitext(os.path.basename(character_path))[0]
 
     persona_config = configparser.ConfigParser()
     persona_path = os.path.join(base_dir, 'character', character_name, 'persona.ini')
@@ -184,8 +208,8 @@ def load_config():
         },
         "CHAR": {
             "language": language,
-            "character_card_path": _lang_get('CHAR', 'character_card_path'),
-            "user_name": _lang_get('CHAR', 'user_name'),
+            "character_card_path": character_path,
+            "user_name": _lang_get('CHAR', 'user_name', fallback='Joe' if language == 'en' else '창희'),
             "user_details": _lang_get('CHAR', 'user_details'),
             "traits": persona_traits,  # Include the traits from persona.ini
         },
