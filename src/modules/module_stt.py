@@ -323,26 +323,11 @@ class STTManager:
 
             entries.append({"text": text, "audio_path": audio_path})
 
-        if prerecorded:
-            with_audio = sum(1 for e in entries if e['audio_path'])
-            dir_label = audio_dir_rel or '(auto-detect)'
+        if prerecorded and not audio_dirs:
             queue_message(
-                f"LOAD: Wake responses={len(entries)} paired audio={with_audio} "
-                f"dir={dir_label}"
+                "WARNING: No wake audio folder found. Put mp3 in "
+                "character/TARS/yooni_wakeword/ (see manifest.json)."
             )
-            if audio_dirs:
-                queue_message(f"LOAD: wake audio search dirs: {', '.join(audio_dirs)}")
-            else:
-                queue_message(
-                    "WARNING: No wake audio folder found. Put mp3 in "
-                    "character/TARS/yooni_wakeword/ (see manifest.json)."
-                )
-            for entry in entries:
-                audio_label = (
-                    os.path.basename(entry['audio_path'])
-                    if entry['audio_path'] else 'MISSING'
-                )
-                queue_message(f"LOAD: wake '{entry['text']}' -> {audio_label}")
 
         return entries
 
