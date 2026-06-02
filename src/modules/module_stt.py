@@ -406,8 +406,14 @@ class STTManager:
 
 # Progress bar
     def _update_silence_bar(self, frames, max_frames):
-        """Silence progress bar (disabled for clean console)."""
-        return
+        """In-place silence bar (same line, does not erase USER/TARS above)."""
+        bar_length = 10
+        progress = int((frames / max_frames) * bar_length)
+        filled = "#" * progress
+        empty = "-" * (bar_length - progress)
+        bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
+        print(f"\r{bar}", end="", flush=True)
+        self._silence_bar_visible = True
 
     def _clear_silence_bar(self, finish_line=False):
         if not self._silence_bar_visible:
@@ -723,6 +729,7 @@ class STTManager:
         Process a user utterance after wake word detection.
         Returns True if speech was transcribed and handled.
         """
+        print(f"\nSTAT: Listening...")
         self._stt_debug(f"transcribe start processor={self.config['STT'].get('stt_processor')}")
         result = None
         try:
