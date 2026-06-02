@@ -156,11 +156,15 @@ def utterance_callback(message):
 
         queue_message(f"TARS: {reply}")
 
-        reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
+        tts_text = reply
+        if CONFIG['TTS']['ttsoption'] != 'elevenlabs':
+            tts_text = re.sub(
+                r'[^\w\s.,?!;:"\'\-。、，·…]', '', tts_text, flags=re.UNICODE
+            )
 
         if stt_manager:
             stt_manager._release_audio_input(pause=0.05)
-        asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
+        asyncio.run(play_audio_chunks(tts_text, CONFIG['TTS']))
         if stt_manager:
             stt_manager._release_audio_input(pause=0.05)
 
