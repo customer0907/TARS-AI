@@ -247,6 +247,13 @@ def load_config():
             # ALSA card index/name for `amixer -c <card>`. Empty = default card.
             "card": config.get('VOLUME', 'card', fallback=''),
         },
+        "WEATHER": {
+            "latitude": config.get('WEATHER', 'latitude', fallback='37.447'),
+            "longitude": config.get('WEATHER', 'longitude', fallback='126.731'),
+            "location_name": config.get('WEATHER', 'location_name', fallback='인천 남동구'),
+            "timezone": config.get('WEATHER', 'timezone', fallback='Asia/Seoul'),
+            "forecast_days": config.get('WEATHER', 'forecast_days', fallback='7'),
+        },
         "DISCORD": {
             "TOKEN": os.getenv('DISCORD_TOKEN'),
             "channel_id": config['DISCORD']['channel_id'],

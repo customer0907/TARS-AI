@@ -184,7 +184,8 @@ async def play_audio_chunks(text, config):
             # Read the audio chunk into a format playable by sounddevice
             data, samplerate = sf.read(audio_chunk, dtype='float32')
             sd.play(data, samplerate)
-            await asyncio.sleep(len(data) / samplerate)  # Wait for playback to finish
+            sd.wait()
+            await asyncio.sleep(0.05)
         except Exception as e:
             queue_message(f"ERROR: Failed to play audio chunk: {e}")
 

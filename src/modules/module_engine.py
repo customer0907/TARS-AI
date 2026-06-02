@@ -35,9 +35,11 @@ import joblib
 from datetime import datetime
 import threading
 import socket
+import re
 
 # === Custom Modules ===
 from modules.module_websearch import search_google, search_google_news
+from modules.module_weather import get_weather
 from modules.module_vision import describe_camera_view
 from modules.module_stablediffusion import generate_image
 from modules.module_volume import handle_volume_command
@@ -259,10 +261,29 @@ def call_function(module_name, *args, **kwargs):
     except Exception as e:
         queue_message(f"[DEBUG] Error while executing {module_name}: {e}")
 
+# Date/time questions should use Interaction Context, not the Weather tool.
+_DATE_ONLY = re.compile(
+    r"(몇\s*월|며칠|무슨\s*요일|요일|날짜|몇\s*일|지금\s*몇\s*시|몇\s*시)",
+    re.I,
+)
+_WEATHER_HINT = re.compile(
+    r"(날씨|비|눈|우산|기온|추워|더워|미세|습도|맑|흐림|소나기|강수)",
+    re.I,
+)
+
+
+def _is_date_or_time_only(user_input):
+    text = user_input or ""
+    return bool(_DATE_ONLY.search(text)) and not _WEATHER_HINT.search(text)
+
+
 def check_for_module(user_input):
     """
     Determines the appropriate module to handle the user's input and invokes it.
     """
+    if _is_date_or_time_only(user_input):
+        return "None"
+
     if CONFIG['HOME_ASSISTANT']['enabled'] == "True":
         from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
         if map_prompt_to_ha_service(user_input):
@@ -531,7 +552,7 @@ def adjust_persona(user_input):
  
 # === Function Calling ===
 FUNCTION_REGISTRY = {
-    "Weather": search_google, 
+    "Weather": get_weather,
     "News": search_google_news,
     "Move": movement_llmcall,
     "Vision": describe_camera_view,

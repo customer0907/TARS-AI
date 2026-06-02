@@ -178,6 +178,8 @@ def utterance_callback(message):
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
         if stt_manager and stt_manager.stt_debug:
             stt_manager._stt_debug(f"TTS play_audio_chunks done ({time.time() - t0:.2f}s)")
+        if stt_manager:
+            stt_manager._release_audio_input(pause=0.05)
 
     except json.JSONDecodeError:
         queue_message("ERROR: Invalid JSON format. Could not process user message.")

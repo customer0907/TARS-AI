@@ -203,6 +203,15 @@ card =
 # ALSA card index or name for `amixer -c <card>`. Leave empty for the default card.
 # Example for a USB DAC at card 2: card = 2
 
+[WEATHER] # Open-Meteo (free HTTP API, no key). Replaces Google scrape for NB "Weather".
+latitude = 37.447
+longitude = 126.731
+# Incheon Namdong-gu approx. Adjust if you want a finer point.
+location_name = 인천 남동구
+timezone = Asia/Seoul
+forecast_days = 7
+# Weekly forecast length when user asks for 일주일/이번 주 날씨 etc.
+
 [DISCORD] # Discord bot integration
 enabled = False
 # Enable or disable Discord integration
