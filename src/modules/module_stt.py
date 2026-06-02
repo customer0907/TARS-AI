@@ -626,7 +626,7 @@ class STTManager:
 
         if self.config['STT']['use_indicators']:
             self.play_beep(400, 0.1, 44100, 0.6)  # sleeping tone
-        print(f"TARS: Sleeping...")
+        queue_message("TARS: Sleeping...")
 
         mic_index = self._get_input_device()
         last_heartbeat = time.time()
@@ -680,7 +680,7 @@ class STTManager:
                                 wake_response = self._pick_wake_response()
                                 break
                             if text:
-                                print(f"INFO: waiting wake word: {text}", flush=True)
+                                queue_message(f"INFO: waiting wake word: {text}")
                             last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
@@ -700,7 +700,7 @@ class STTManager:
 
         if wake_response:
             label = wake_response.get('text', wake_response) if isinstance(wake_response, dict) else wake_response
-            print(f"TARS: {label}", flush=True)
+            queue_message(f"TARS: {label}")
             self._release_audio_input(pause=0.05)
             if self.wake_word_callback:
                 self.wake_word_callback(wake_response)

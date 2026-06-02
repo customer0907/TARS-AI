@@ -2,10 +2,26 @@ import sys
 import time
 import threading
 import queue
+import re
+from datetime import datetime
 
 # Queue for handling message processing
 message_queue = queue.Queue()
 output_lock = threading.Lock()  # 🔹 Single lock for ALL stdout operations
+
+_TIMESTAMP_PREFIX = re.compile(r'^\[\d{2}:\d{2}:\d{2}\] ')
+
+
+def format_console_line(message: str) -> str:
+    """Prefix USER:/TARS:/INFO: lines with [HH:MM:SS] for the live console."""
+    text = message.strip()
+    if not text or _TIMESTAMP_PREFIX.match(text):
+        return text
+    for prefix in ("USER:", "TARS:", "INFO:"):
+        if text.startswith(prefix):
+            ts = datetime.now().strftime("%H:%M:%S")
+            return f"[{ts}] {text}"
+    return text
 
 def process_message_queue():
     """ Continuously process the message queue in order. """
@@ -60,7 +76,7 @@ def queue_message(message, stream=False):
                                Defaults to False if not provided.
     """
     if message and message.strip():
-        message_queue.put((message.strip(), stream))  # 🔹 No lock needed here
+        message_queue.put((format_console_line(message.strip()), stream))  # 🔹 No lock needed here
 
 def stop_message_processing():
     """ Stops the message processing thread safely. """
