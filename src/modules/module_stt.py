@@ -689,7 +689,7 @@ class STTManager:
                                 wake_response = self._pick_wake_response()
                                 break
                             if text:
-                                print(f"DEBUG: waiting wake word: {text}", flush=True)
+                                print(f"INFO: waiting wake word: {text}", flush=True)
                             last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
