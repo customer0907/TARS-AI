@@ -75,6 +75,7 @@ class STTManager:
             self.config['STT'].get('whisper_timeout_sec', 45)
         )
         self.mic_index = None
+        self.silence_margin = 3.5
         self.WAKE_WORDS = self._parse_wake_words(self.config['STT']['wake_word'])
         self.TARS_RESPONSES = self._load_wake_responses()
         self._load_vosk_model()
@@ -118,15 +119,35 @@ class STTManager:
                 candidates.append(value)
         return candidates
 
-    def _resolve_audio_file(self, base_dir, audio_dir, filename):
+    def _wake_audio_search_dirs(self, base_dir, audio_dir_rel):
+        """Candidate folders for pre-recorded wake clips (config path + common fallbacks)."""
+        dirs = []
+        seen = set()
+        candidates = []
+        if audio_dir_rel:
+            candidates.append(audio_dir_rel)
+        candidates.extend([
+            'character/TARS/yooni_wakeword',
+            'yooni_wakeword',
+            'character/TARS/wake_audio_ko',
+        ])
+        for rel in candidates:
+            path = os.path.join(base_dir, rel.replace('/', os.path.sep))
+            norm = os.path.normpath(path)
+            if norm in seen:
+                continue
+            seen.add(norm)
+            if os.path.isdir(norm):
+                dirs.append(norm)
+        return dirs
+
+    def _resolve_audio_file(self, base_dir, audio_dirs, filename):
         if not filename:
             return None
         filename = filename.strip().replace('/', os.path.sep)
         if os.path.isabs(filename):
             return filename if os.path.isfile(filename) else None
-        search_roots = []
-        if audio_dir:
-            search_roots.append(audio_dir)
+        search_roots = list(audio_dirs) if audio_dirs else []
         search_roots.append(base_dir)
         for root in search_roots:
             candidate = os.path.join(root, filename)
@@ -134,55 +155,58 @@ class STTManager:
                 return candidate
         return None
 
-    def _find_audio_by_text(self, audio_dir, text):
-        if not audio_dir or not os.path.isdir(audio_dir):
+    def _find_audio_by_text(self, audio_dirs, text):
+        if not audio_dirs:
             return None
-        for stem in self._text_audio_name_candidates(text):
+        for audio_dir in audio_dirs:
+            for stem in self._text_audio_name_candidates(text):
+                for ext in ('mp3', 'wav', 'ogg', 'm4a'):
+                    candidate = os.path.join(audio_dir, f"{stem}.{ext}")
+                    if os.path.isfile(candidate):
+                        return candidate
+        return None
+
+    def _find_audio_by_index(self, audio_dirs, idx):
+        if not audio_dirs:
+            return None
+        for audio_dir in audio_dirs:
             for ext in ('mp3', 'wav', 'ogg', 'm4a'):
-                candidate = os.path.join(audio_dir, f"{stem}.{ext}")
-                if os.path.isfile(candidate):
-                    return candidate
+                for name in (f"{idx + 1:02d}.{ext}", f"{idx + 1}.{ext}"):
+                    candidate = os.path.join(audio_dir, name)
+                    if os.path.isfile(candidate):
+                        return candidate
         return None
 
-    def _find_audio_by_index(self, audio_dir, idx):
-        if not audio_dir or not os.path.isdir(audio_dir):
-            return None
-        for ext in ('mp3', 'wav', 'ogg', 'm4a'):
-            for name in (f"{idx + 1:02d}.{ext}", f"{idx + 1}.{ext}"):
-                candidate = os.path.join(audio_dir, name)
-                if os.path.isfile(candidate):
-                    return candidate
-        return None
-
-    def _load_wake_manifest(self, audio_dir):
+    def _load_wake_manifest(self, audio_dirs):
         """Optional manifest.json: explicit text -> audio pairing (no index guessing)."""
-        if not audio_dir:
-            return {}
-        path = os.path.join(audio_dir, 'manifest.json')
-        if not os.path.isfile(path):
-            return {}
-        try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            queue_message(f"WARNING: wake manifest invalid ({path}): {e}")
-            return {}
+        for audio_dir in audio_dirs or []:
+            path = os.path.join(audio_dir, 'manifest.json')
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding='utf-8') as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                queue_message(f"WARNING: wake manifest invalid ({path}): {e}")
+                continue
 
-        mapping = {}
-        if isinstance(data, list):
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                text = (item.get('text') or '').strip()
-                audio = item.get('audio') or item.get('file')
-                if text and audio:
-                    mapping[text] = str(audio).strip()
-        elif isinstance(data, dict):
-            for text, audio in data.items():
-                text = str(text).strip()
-                if text and audio:
-                    mapping[text] = str(audio).strip()
-        return mapping
+            mapping = {}
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    text = (item.get('text') or '').strip()
+                    audio = item.get('audio') or item.get('file')
+                    if text and audio:
+                        mapping[text] = str(audio).strip()
+            elif isinstance(data, dict):
+                for text, audio in data.items():
+                    text = str(text).strip()
+                    if text and audio:
+                        mapping[text] = str(audio).strip()
+            if mapping:
+                return mapping
+        return {}
 
     def _load_wake_responses(self):
         """Load wake lines; each entry keeps text and its own audio_path in sync."""
@@ -215,14 +239,11 @@ class STTManager:
             self.config['STT'].get('wake_prerecorded', 'false')
         ).lower() in ('true', '1', 'yes')
         audio_dir_rel = self.config['STT'].get('wake_audio_dir', '')
-        audio_dir = (
-            os.path.join(base_dir, audio_dir_rel.replace('/', os.path.sep))
-            if audio_dir_rel else None
-        )
+        audio_dirs = self._wake_audio_search_dirs(base_dir, audio_dir_rel)
         use_index = str(
             self.config['STT'].get('wake_audio_by_index', 'false')
         ).lower() in ('true', '1', 'yes')
-        manifest = self._load_wake_manifest(audio_dir)
+        manifest = self._load_wake_manifest(audio_dirs)
 
         entries = []
         for idx, raw in enumerate(raw_lines):
@@ -237,25 +258,33 @@ class STTManager:
             if prerecorded:
                 if text in manifest:
                     audio_path = self._resolve_audio_file(
-                        base_dir, audio_dir, manifest[text]
+                        base_dir, audio_dirs, manifest[text]
                     )
                 if not audio_path and audio_spec:
                     audio_path = self._resolve_audio_file(
-                        base_dir, audio_dir, audio_spec
+                        base_dir, audio_dirs, audio_spec
                     )
                 if not audio_path:
-                    audio_path = self._find_audio_by_text(audio_dir, text)
+                    audio_path = self._find_audio_by_text(audio_dirs, text)
                 if not audio_path and use_index:
-                    audio_path = self._find_audio_by_index(audio_dir, idx)
+                    audio_path = self._find_audio_by_index(audio_dirs, idx)
 
             entries.append({"text": text, "audio_path": audio_path})
 
         if prerecorded:
             with_audio = sum(1 for e in entries if e['audio_path'])
+            dir_label = audio_dir_rel or '(auto-detect)'
             queue_message(
                 f"LOAD: Wake responses={len(entries)} paired audio={with_audio} "
-                f"dir={audio_dir_rel or '(none)'}"
+                f"dir={dir_label}"
             )
+            if audio_dirs:
+                queue_message(f"LOAD: wake audio search dirs: {', '.join(audio_dirs)}")
+            else:
+                queue_message(
+                    "WARNING: No wake audio folder found. Put mp3 in "
+                    "character/TARS/yooni_wakeword/ (see manifest.json)."
+                )
             for entry in entries:
                 audio_label = (
                     os.path.basename(entry['audio_path'])

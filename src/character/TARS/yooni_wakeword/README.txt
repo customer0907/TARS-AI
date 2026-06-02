@@ -1,4 +1,4 @@
-Put ElevenLabs yooni wake clips here. Filename MUST match the spoken line.
+Put ElevenLabs yooni wake clips here (or src/yooni_wakeword/ — both are searched).
 
 Required files (see manifest.json):
   나 불렀어.mp3
