@@ -47,7 +47,7 @@ def get_completion(user_prompt, istext=True):
         "Authorization": f"Bearer {CONFIG['LLM']['api_key']}"
     }
     llm_backend = CONFIG['LLM']['llm_backend']
-    url, data = _prepare_request_data(llm_backend, prompt)
+    url, data = _prepare_request_data(llm_backend, prompt, _build_system_prompt())
 
     try:
         response = requests.post(url, headers=headers, json=data)
@@ -61,38 +61,62 @@ def get_completion(user_prompt, istext=True):
         queue_message(f"ERROR: LLM request failed: {e}")
         return None
 
-def _prepare_request_data(llm_backend, prompt):
+def _build_system_prompt():
+    """
+    Build a real `system` role for Gemini/OpenAI in ko mode.
+
+    Burying persona rules inside the user turn ("System:" text) lets a small model
+    like gemini-2.5-flash-lite weight them weakly and fall back to "잘 모르겠어".
+    A genuine system role is followed far more strictly. ko card is a stub, so there
+    is no character-card conflict (the reason this was removed for English mode).
+    """
+    if CONFIG['CHAR'].get('language', 'en') != 'ko':
+        return None
+    char_name = character_manager.char_name if character_manager else ''
+    user_name = CONFIG['CHAR'].get('user_name', '')
+    parts = [
+        CONFIG['LLM'].get('systemprompt', ''),
+        CONFIG['LLM'].get('instructionprompt', ''),
+    ]
+    text = "\n".join(p for p in parts if p and p.strip())
+    text = text.replace('{char}', char_name).replace('{user}', user_name).strip()
+    return text or None
+
+
+def _prepare_request_data(llm_backend, prompt, system_prompt=None):
     """
     Prepare the request URL and data for the LLM backend.
 
     Parameters:
     - llm_backend (str): The LLM backend name.
     - prompt (str): The formatted prompt.
+    - system_prompt (str|None): Optional system-role content (persona enforcement).
 
     Returns:
     - tuple: URL and data payload for the request.
     """
     if llm_backend == "openai":
         url = f"{CONFIG['LLM']['base_url']}/v1/chat/completions"
-        # build_prompt() already embeds System/Instruction/Character in `prompt`.
-        # A separate system role with systemprompt alone made Gemini ignore Character
-        # Details and fall back to generic "I'm an AI" refusals.
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         data = {
             "model": CONFIG['LLM']['openai_model'],
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "max_tokens": CONFIG['LLM']['max_tokens'],
             "temperature": CONFIG['LLM']['temperature'],
             "top_p": CONFIG['LLM']['top_p']
         }
     elif llm_backend == "deepinfra":
         url = f"{CONFIG['LLM']['base_url']}/v1/openai/chat/completions"
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         data = {
             "model": CONFIG['LLM']['openai_model'],
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "max_tokens": CONFIG['LLM']['max_tokens'],
             "temperature": CONFIG['LLM']['temperature'],
             "top_p": CONFIG['LLM']['top_p']
