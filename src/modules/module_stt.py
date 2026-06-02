@@ -107,6 +107,8 @@ class STTManager:
             if w.strip()
         ]
 
+    _AUDIO_EXTS = ('mp3', 'wav', 'ogg', 'm4a')
+
     def _text_audio_name_candidates(self, text):
         """Filename stems to search for a wake line's audio clip."""
         raw = text.strip()
@@ -141,18 +143,61 @@ class STTManager:
                 dirs.append(norm)
         return dirs
 
+    def _find_audio_in_dir(self, audio_dir, stem):
+        """Find audio by stem; Linux is case-sensitive so also scan .MP3 etc."""
+        if not audio_dir or not stem:
+            return None
+        for ext in self._AUDIO_EXTS:
+            candidate = os.path.join(audio_dir, f"{stem}.{ext}")
+            if os.path.isfile(candidate):
+                return candidate
+        try:
+            target = stem.lower()
+            for name in os.listdir(audio_dir):
+                base, dot, suffix = name.rpartition('.')
+                if not dot or suffix.lower() not in self._AUDIO_EXTS:
+                    continue
+                if base.lower() == target:
+                    return os.path.join(audio_dir, name)
+        except OSError:
+            pass
+        return None
+
     def _resolve_audio_file(self, base_dir, audio_dirs, filename):
         if not filename:
             return None
         filename = filename.strip().replace('/', os.path.sep)
         if os.path.isabs(filename):
-            return filename if os.path.isfile(filename) else None
+            if os.path.isfile(filename):
+                return filename
+            base = os.path.basename(filename)
+            parent = os.path.dirname(filename)
+            if parent and os.path.isdir(parent):
+                found = self._find_audio_in_dir(parent, os.path.splitext(base)[0])
+                if found:
+                    return found
+            return None
         search_roots = list(audio_dirs) if audio_dirs else []
         search_roots.append(base_dir)
         for root in search_roots:
             candidate = os.path.join(root, filename)
             if os.path.isfile(candidate):
                 return candidate
+            try:
+                for name in os.listdir(root):
+                    if name.lower() == filename.lower():
+                        return os.path.join(root, name)
+            except OSError:
+                pass
+            stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            found = self._find_audio_in_dir(root, stem)
+            if found:
+                return found
+            compact = stem.replace(' ', '')
+            if compact != stem:
+                found = self._find_audio_in_dir(root, compact)
+                if found:
+                    return found
         return None
 
     def _find_audio_by_text(self, audio_dirs, text):
@@ -160,21 +205,31 @@ class STTManager:
             return None
         for audio_dir in audio_dirs:
             for stem in self._text_audio_name_candidates(text):
-                for ext in ('mp3', 'wav', 'ogg', 'm4a'):
-                    candidate = os.path.join(audio_dir, f"{stem}.{ext}")
-                    if os.path.isfile(candidate):
-                        return candidate
+                found = self._find_audio_in_dir(audio_dir, stem)
+                if found:
+                    return found
         return None
 
     def _find_audio_by_index(self, audio_dirs, idx):
         if not audio_dirs:
             return None
         for audio_dir in audio_dirs:
-            for ext in ('mp3', 'wav', 'ogg', 'm4a'):
+            for ext in self._AUDIO_EXTS:
                 for name in (f"{idx + 1:02d}.{ext}", f"{idx + 1}.{ext}"):
                     candidate = os.path.join(audio_dir, name)
                     if os.path.isfile(candidate):
                         return candidate
+            try:
+                prefix = f"{idx + 1:02d}."
+                prefix2 = f"{idx + 1}."
+                for name in os.listdir(audio_dir):
+                    lower = name.lower()
+                    if lower.startswith(prefix) or lower.startswith(prefix2):
+                        suffix = name.rsplit('.', 1)[-1].lower()
+                        if suffix in self._AUDIO_EXTS:
+                            return os.path.join(audio_dir, name)
+            except OSError:
+                pass
         return None
 
     def _load_wake_manifest(self, audio_dirs):
