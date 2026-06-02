@@ -277,6 +277,20 @@ def _is_date_or_time_only(user_input):
     return bool(_DATE_ONLY.search(text)) and not _WEATHER_HINT.search(text)
 
 
+def _has_weather_hint(user_input):
+    return bool(_WEATHER_HINT.search(user_input or ""))
+
+
+def _weather_prediction_allowed(user_input, predicted_class):
+    """Weather tool only when the utterance mentions weather-related topics."""
+    if predicted_class != "Weather":
+        return True
+    if _has_weather_hint(user_input):
+        return True
+    queue_message("INFO: Weather rejected (no weather keywords); treating as Chat")
+    return False
+
+
 def check_for_module(user_input):
     """
     Determines the appropriate module to handle the user's input and invokes it.
@@ -292,6 +306,9 @@ def check_for_module(user_input):
 
     predicted_class, probability = predict_class(user_input)
     if not predicted_class:
+        return "None"
+
+    if not _weather_prediction_allowed(user_input, predicted_class):
         return "None"
     
     # Call the function associated with the predicted class
