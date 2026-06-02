@@ -205,6 +205,7 @@ def load_config():
             "seed": int(config['LLM']['seed']),
             "systemprompt": _lang_get('LLM', 'systemprompt'),
             "instructionprompt": _lang_get('LLM', 'instructionprompt'),
+            "reasoning_effort": config.get('LLM', 'reasoning_effort', fallback=''),
         },
         "VISION": {
             "server_hosted": config.getboolean('VISION', 'server_hosted'),

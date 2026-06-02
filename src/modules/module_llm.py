@@ -101,13 +101,23 @@ def _prepare_request_data(llm_backend, prompt, system_prompt=None):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        model = CONFIG['LLM']['openai_model']
         data = {
-            "model": CONFIG['LLM']['openai_model'],
+            "model": model,
             "messages": messages,
             "max_tokens": CONFIG['LLM']['max_tokens'],
             "temperature": CONFIG['LLM']['temperature'],
             "top_p": CONFIG['LLM']['top_p']
         }
+        # Gemini 2.5 "thinking" tokens are billed against max_tokens; with a small
+        # max_tokens the visible reply gets truncated mid-sentence. Disable thinking
+        # via the OpenAI-compat reasoning_effort param (gemini-2.5 only, so real
+        # OpenAI models like gpt-4o-mini are untouched).
+        effort = str(CONFIG['LLM'].get('reasoning_effort', '') or '').strip().lower()
+        if not effort and 'gemini-2.5' in model.lower():
+            effort = 'none'
+        if effort:
+            data['reasoning_effort'] = effort
     elif llm_backend == "deepinfra":
         url = f"{CONFIG['LLM']['base_url']}/v1/openai/chat/completions"
         messages = []
