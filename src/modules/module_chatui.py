@@ -81,11 +81,36 @@ swayamount = 1   # You can change this value from 1 to 10.
 sprite = 'tars'
 emotion = 'neutral'
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 character_path = CONFIG['CHAR']['character_card_path']
-character_name = os.path.splitext(os.path.basename(character_path))[0]  # Extract filename without extension
- 
-CHARACTER_DIR = os.path.join(BASE_DIR, "character", character_name, "images", emotion)
+character_name = os.path.splitext(os.path.basename(character_path))[0]
+
+
+def _resolve_sprite_dir(character_name, emotion_name, sprite_name):
+    """
+    Face sprite PNGs live under character/<name>/images/<emotion>/.
+    Personas such as TARS_KO may not ship their own UI assets; fall back to TARS.
+    """
+    probe = f"{sprite_name}_nottalking_eyes_open.png"
+    primary = os.path.join(BASE_DIR, "character", character_name, "images", emotion_name)
+    if os.path.isfile(os.path.join(primary, probe)):
+        return primary
+
+    fallback_char = "TARS"
+    fallback = os.path.join(BASE_DIR, "character", fallback_char, "images", emotion_name)
+    if os.path.isfile(os.path.join(fallback, probe)):
+        queue_message(
+            f"INFO: Chat UI sprites missing for {character_name}; using {fallback_char} images."
+        )
+        return fallback
+
+    raise FileNotFoundError(
+        f"Chat UI sprite not found: {os.path.join(primary, probe)} "
+        f"(fallback {fallback} also missing)"
+    )
+
+
+CHARACTER_DIR = _resolve_sprite_dir(character_name, emotion, sprite)
 
 # Load images using the absolute path
 img_nottalking_open = Image.open(os.path.join(CHARACTER_DIR, f"{sprite}_nottalking_eyes_open.png")).convert("RGBA")
