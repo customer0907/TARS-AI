@@ -53,6 +53,15 @@ _USER_FACT_PATTERNS = [
     r'내\s+(?:이름|생일|나이|직업|취미|주소|번호|전화)',
 ]
 
+_SESSION_CONTEXT_PATTERNS = [
+    r'무슨\s*얘기',
+    r'뭐\s*얘기',
+    r'이야기\s*하고\s*있',
+    r'방금\s*얘기',
+    r'아까\s*얘기',
+    r'지금\s*.*얘기',
+]
+
 
 class MemoryManager:
     """
@@ -75,6 +84,7 @@ class MemoryManager:
         self.long_mem_use = True
         self.initial_memory_path =  os.path.abspath(os.path.join(os.path.join("..", "memory", "initial_memory.json")))
         
+        self.session_turns = []
         self.init_dynamic_memory()
         self.load_initial_memory(self.initial_memory_path)
 
@@ -127,6 +137,22 @@ class MemoryManager:
         if not user_input:
             return True
         return self._should_persist_memory(user_input, document.get('bot_response', ''))
+
+    def _is_session_context_query(self, user_input: str) -> bool:
+        text = (user_input or "").strip()
+        if not text:
+            return False
+        for pattern in _SESSION_CONTEXT_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        return False
+
+    def add_session_turn(self, user_input: str, bot_response: str):
+        user_input = (user_input or "").strip()
+        bot_response = (bot_response or "").strip()
+        if not user_input or not bot_response:
+            return
+        self.session_turns.append((user_input, bot_response))
 
     def write_longterm_memory(self, user_input: str, bot_response: str):
         """
@@ -207,6 +233,8 @@ class MemoryManager:
         - str: Relevant memory or a fallback message.
         """
         try:
+            if self._is_session_context_query(user_input):
+                return "No relevant memories found."
             if self.long_mem_use:
                 # Fetch related memories
                 past = self.get_related_memories(user_input)
@@ -243,6 +271,22 @@ class MemoryManager:
         accumulated_documents = []
         accumulated_length = 0
 
+        def try_add_turn(user_input, bot_response):
+            nonlocal accumulated_length
+            if not user_input or not bot_response:
+                return False
+            text_str = f"user_input: {user_input}\nbot_response: {bot_response}"
+            text_length = self.token_count(text_str)['length']
+            if accumulated_length + text_length > token_limit:
+                return False
+            accumulated_documents.append((user_input, bot_response))
+            accumulated_length += text_length
+            return True
+
+        for user_input, bot_response in reversed(self.session_turns):
+            if not try_add_turn(user_input, bot_response):
+                break
+
         for entry in reversed(self.hyper_db.dict()):
             user_input = entry['document'].get('user_input', "")
             bot_response = entry['document'].get('bot_response', "")
@@ -253,14 +297,8 @@ class MemoryManager:
             if not self._is_retrievable_document(entry['document']):
                 continue
 
-            text_str = f"user_input: {user_input}\nbot_response: {bot_response}"
-            text_length = self.token_count(text_str)['length']
-
-            if accumulated_length + text_length > token_limit:
+            if not try_add_turn(user_input, bot_response):
                 break
-
-            accumulated_documents.append((user_input, bot_response))
-            accumulated_length += text_length
 
         formatted_output = '\n'.join(
             [f"{{user}}: {ui}\n{{char}}: {br}" for ui, br in reversed(accumulated_documents)]

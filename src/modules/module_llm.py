@@ -218,6 +218,7 @@ def llm_process(user_input, bot_response):
     - str: The processed bot response.
     """
     if memory_manager:
+        memory_manager.add_session_turn(user_input, bot_response)
         threading.Thread(target=memory_manager.write_longterm_memory, args=(user_input, bot_response)).start()
     
     if CONFIG['EMOTION']['enabled']:
