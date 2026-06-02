@@ -3,17 +3,32 @@
 import subprocess
 import re
 
+from modules.module_config import load_config
 from modules.module_messageQue import queue_message
 
+# Loaded once at import. Provides [VOLUME] control/card and [CHAR] language.
+_CONFIG = load_config()
+
+
 class RaspbianVolumeManager:
-    def __init__(self, control='Master'):
+    def __init__(self, control='Master', card=None):
         self.control = control
+        # card may be an index ("2") or name; empty/None means the default card.
+        self.card = card if card not in (None, '') else None
+
+    def _amixer(self, *args):
+        """Build an amixer command, targeting a specific card when configured."""
+        cmd = ['amixer']
+        if self.card is not None:
+            cmd += ['-c', str(self.card)]
+        cmd += list(args)
+        return cmd
 
     def get_volume(self):
         try:
             # Executes the amixer command to get volume information
             output = subprocess.check_output(
-                ['amixer', 'get', self.control],
+                self._amixer('get', self.control),
                 stderr=subprocess.STDOUT
             ).decode('utf-8')
 
@@ -33,6 +48,12 @@ class RaspbianVolumeManager:
             elif right_match:  # If only the right channel is present
                 return int(right_match.group(1))
 
+            # Fallback for mono controls such as a USB DAC 'PCM'
+            # (e.g. "Mono: Playback 47 [70%] [-18.00dB] [on]").
+            mono_match = re.search(r'\[(\d+)%\]', output)
+            if mono_match:
+                return int(mono_match.group(1))
+
             raise RuntimeError("Volume percentage not found in amixer output.")
         except subprocess.CalledProcessError as e:
             queue_message(f"Error getting volume: {e}")
@@ -43,7 +64,7 @@ class RaspbianVolumeManager:
             raise ValueError("Volume percentage must be between 0 and 100.")
         try:
             subprocess.check_call(
-                ['amixer', 'set', self.control, f'{percent}%'],
+                self._amixer('set', self.control, f'{percent}%'),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT
             )
@@ -81,9 +102,55 @@ def correct_transcription(transcribed_text):
     return transcribed_text
 
 
+# Keyword tables for intent detection (Korean + English). Order of checks in
+# _detect_volume_action matters (unmute before mute, max before set, verbs before
+# bare numbers). These run only after NB has already classified input as Volume.
+_KW_UNMUTE = ['음소거 해제', '음소거해제', '뮤트 해제', '뮤트해제', '소리 켜', '소리켜',
+              'unmute', 'activate sound']
+_KW_MUTE = ['음소거', '뮤트', '소거', '조용', '입 다물', '입다물', '시끄', 'mute']
+_KW_MAX = ['최대', '맥스', 'maximum', 'max volume', 'max the volume', 'full volume']
+_KW_UP = ['키워', '올려', '높여', '크게', '업', 'increase', 'raise', 'louder', 'turn up',
+          'volume up', 'sound up', 'higher']
+_KW_DOWN = ['줄여', '낮춰', '낮추', '내려', '작게', '다운', 'decrease', 'lower', 'softer',
+            'reduce', 'turn down', 'volume down', 'sound down']
+_KW_CHECK = ['현재 볼륨', '볼륨 얼마', '볼륨얼마', '소리 얼마', 'check volume', 'current volume']
+
+DEFAULT_STEP = 10
+
+
+def _detect_volume_action(text):
+    """
+    Map an EN/KO volume utterance to (action, amount).
+    action in {increase, decrease, set, mute, unmute, check, None}; amount may be None.
+    """
+    t = text.lower()
+    num = re.search(r'(\d{1,3})', t)
+    num_val = int(num.group(1)) if num else None
+
+    if any(k in t for k in _KW_UNMUTE):
+        return 'unmute', None
+    if any(k in t for k in _KW_MUTE):
+        return 'mute', None
+    if any(k in t for k in _KW_MAX):
+        return 'set', 100
+    if any(k in t for k in _KW_UP):
+        return 'increase', num_val
+    if any(k in t for k in _KW_DOWN):
+        return 'decrease', num_val
+    # Bare "set to N" style: a number present with no up/down verb.
+    if num_val is not None:
+        return 'set', num_val
+    if any(k in t for k in _KW_CHECK):
+        return 'check', None
+    return None, None
+
+
 def handle_volume_command(user_input):
     """
-    Interprets and handles volume-related commands from the user input.
+    Interprets and handles volume-related commands (Korean or English).
+    The volume control/card come from [VOLUME] in config; responses are localized
+    by the [CHAR] language switch. NB has already routed the input here as Volume.
+
     Parameters:
         user_input (str): The user's command.
     Returns:
@@ -92,88 +159,64 @@ def handle_volume_command(user_input):
     # Correct the input text based on common misinterpretations
     user_input = correct_transcription(user_input)
 
-    volume_manager = RaspbianVolumeManager()  # Create volume manager instance
+    lang = _CONFIG['CHAR'].get('language', 'en')
+    vol_cfg = _CONFIG.get('VOLUME', {})
+    volume_manager = RaspbianVolumeManager(
+        control=vol_cfg.get('control', 'Master'),
+        card=vol_cfg.get('card', ''),
+    )
 
     current_volume = volume_manager.get_volume()
 
+    def msg(ko, en):
+        return ko if lang == 'ko' else en
+
     if current_volume is None:
-        return "Unable to retrieve the current volume level. Please try again."
+        return msg("현재 볼륨을 가져올 수 없어. 사운드 설정을 확인해줘.",
+                   "Unable to retrieve the current volume level. Please try again.")
 
-    #queue_message(f"TOOL: Current Volume {current_volume / 100:.2f}")  # Report the correct volume value
+    action, amount = _detect_volume_action(user_input)
 
-    # Handle specific volume commands
-    if "increase" in user_input.lower() or "raise" in user_input.lower():
-        increment = 10
-        if "by" in user_input.lower():
-            match = re.search(r'by (\d+)', user_input.lower())
-            if match:
-                increment = int(match.group(1))
-        new_volume = min(current_volume + increment, 100)
+    if action == 'increase':
+        step = amount if amount else DEFAULT_STEP
+        new_volume = min(current_volume + step, 100)
         volume_manager.set_volume(new_volume)
-        current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-        return f"Volume increased by {increment}%. Current volume is {current_volume}%."
+        current_volume = volume_manager.get_volume()
+        return msg(f"볼륨을 {step}% 올렸어. 지금 {current_volume}%야.",
+                   f"Volume increased by {step}%. Current volume is {current_volume}%.")
 
-    elif "decrease" in user_input.lower() or "lower" in user_input.lower():
-        decrement = 10
-        if "by" in user_input.lower():
-            match = re.search(r'by (\d+)', user_input.lower())
-            if match:
-                decrement = int(match.group(1))
-        new_volume = max(current_volume - decrement, 0)
+    if action == 'decrease':
+        step = amount if amount else DEFAULT_STEP
+        new_volume = max(current_volume - step, 0)
         volume_manager.set_volume(new_volume)
-        current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-        return f"Volume decreased by {decrement}%. Current volume is {current_volume}%."
+        current_volume = volume_manager.get_volume()
+        return msg(f"볼륨을 {step}% 줄였어. 지금 {current_volume}%야.",
+                   f"Volume decreased by {step}%. Current volume is {current_volume}%.")
 
-    elif "adjust" in user_input.lower():
-        if "up" in user_input.lower():
-            increment = 5
-            if "by" in user_input.lower():
-                match = re.search(r'by (\d+)', user_input.lower())
-                if match:
-                    increment = int(match.group(1))
-            new_volume = min(current_volume + increment, 100)
-            volume_manager.set_volume(new_volume)
-            current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-            return f"Volume adjusted up by {increment}%. Current volume is {current_volume}%."
+    if action == 'set':
+        if amount is None or not (0 <= amount <= 100):
+            return msg("볼륨을 0에서 100 사이로 말해줘.",
+                       "Please provide a valid volume between 0 and 100.")
+        volume_manager.set_volume(amount)
+        current_volume = volume_manager.get_volume()
+        return msg(f"볼륨을 {amount}%로 맞췄어. 지금 {current_volume}%야.",
+                   f"Volume set to {amount}%. Current volume is {current_volume}%.")
 
-        elif "down" in user_input.lower():
-            decrement = 5
-            if "by" in user_input.lower():
-                match = re.search(r'by (\d+)', user_input.lower())
-                if match:
-                    decrement = int(match.group(1))
-            new_volume = max(current_volume - decrement, 0)
-            volume_manager.set_volume(new_volume)
-            current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-            return f"Volume adjusted down by {decrement}%. Current volume is {current_volume}%."
-        else:
-            return "Please specify 'up' or 'down' when using 'adjust'."
-
-    elif "set" in user_input.lower():
-        match = re.search(r'(\d{1,3})%', user_input)
-        if match:
-            volume = int(match.group(1))
-            if 0 <= volume <= 100:
-                volume_manager.set_volume(volume)
-                current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-                return f"Volume set to {volume}%. Current volume is {current_volume}%."
-            else:
-                return "Please provide a valid volume between 0 and 100."
-        else:
-            return "Please specify the volume percentage."
-
-    elif "mute" in user_input.lower():
+    if action == 'mute':
         volume_manager.set_volume(0)
-        current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-        return "Volume has been muted. Current volume is 0%."
+        return msg("음소거했어.", "Volume has been muted. Current volume is 0%.")
 
-    elif "unmute" in user_input.lower() or "activate sound" in user_input.lower():
-        default_volume = 50  # Default volume level when unmuting
+    if action == 'unmute':
+        default_volume = 50
         volume_manager.set_volume(default_volume)
-        current_volume = volume_manager.get_volume()  # Ensure updated value is fetched
-        return f"Volume has been unmuted. Current volume is {current_volume}%."
+        current_volume = volume_manager.get_volume()
+        return msg(f"음소거를 풀었어. 지금 {current_volume}%야.",
+                   f"Volume has been unmuted. Current volume is {current_volume}%.")
 
-    elif "check volume" in user_input.lower() or "current volume" in user_input.lower():
-        return f"The current volume is {current_volume}%."
+    if action == 'check':
+        return msg(f"지금 볼륨은 {current_volume}%야.",
+                   f"The current volume is {current_volume}%.")
 
-    return "Volume control command not recognized. Please specify a valid action (e.g., increase, decrease, adjust, mute, unmute, set)."
+    return msg("볼륨 명령을 못 알아들었어. 키워/줄여/음소거/볼륨 50처럼 말해줘.",
+               "Volume control command not recognized. Please specify a valid action "
+               "(e.g., increase, decrease, mute, unmute, set).")

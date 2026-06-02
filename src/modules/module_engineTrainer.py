@@ -45,7 +45,21 @@ def sort_and_save_data(df):
     sorted_df.to_csv('engine/training/sorted_training_data.csv', index=False)
     # queue_message(f"LOAD: Data sorted and saved as 'sorted_training_data.csv'.")
 
-def train_and_validate_model(df_train, nb_classifier_path, vectorizer_path):
+def _make_vectorizer(language='en'):
+    """
+    Build a TF-IDF vectorizer tuned for the given language.
+
+    - en (default): word-level TF-IDF, unchanged from the original behavior.
+    - ko: character n-gram TF-IDF (char_wb, 2-4). Korean attaches particles/endings
+      to stems and spacing is inconsistent, so subword n-grams match variants like
+      "날씨 어때" / "날씨좀" / "오늘날씨" far better than whitespace word tokens.
+    """
+    if language == 'ko':
+        return TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4), min_df=1)
+    return TfidfVectorizer()
+
+
+def train_and_validate_model(df_train, nb_classifier_path, vectorizer_path, language='en'):
     """
     Train a Naive Bayes classifier with TF-IDF vectorization and validate the model.
 
@@ -53,6 +67,7 @@ def train_and_validate_model(df_train, nb_classifier_path, vectorizer_path):
     - df_train (DataFrame): Raw training data.
     - nb_classifier_path (str): Path to save the trained classifier.
     - vectorizer_path (str): Path to save the vectorizer.
+    - language (str): Language code controlling vectorizer choice ('en' or 'ko').
     """
     # Split data into training and validation sets
     train_df, val_df = train_test_split(df_train, test_size=0.20, stratify=df_train['label'], random_state=42)
@@ -65,8 +80,8 @@ def train_and_validate_model(df_train, nb_classifier_path, vectorizer_path):
         train_df = train_df.sample(frac=1).reset_index(drop=True)
         val_df = val_df.sample(frac=1).reset_index(drop=True)
 
-    # Train the model
-    vectorizer = TfidfVectorizer()
+    # Train the model (language-aware vectorizer)
+    vectorizer = _make_vectorizer(language)
     train_vectors = vectorizer.fit_transform(train_df['query'])
     val_vectors = vectorizer.transform(val_df['query'])
 
@@ -120,7 +135,8 @@ def train_text_classifier(
     training_data_path=DEFAULT_TRAINING_DATA_PATH,
     nb_classifier_path=DEFAULT_MODEL_PATH,
     vectorizer_path=DEFAULT_VECTORIZER_PATH,
-    user_input='y'
+    user_input='y',
+    language='en'
 ):
     """
     Train a text classification model using labeled training data.
@@ -130,6 +146,7 @@ def train_text_classifier(
     - nb_classifier_path (str): Path to save the trained Naive Bayes classifier.
     - vectorizer_path (str): Path to save the TF-IDF vectorizer.
     - user_input (str): User input to control data preparation ('y' for training, 's' for sorting).
+    - language (str): Language code controlling vectorizer choice ('en' or 'ko').
     """
     # queue_message(f"Using scikit-learn version: {sklearn_version}")
 
@@ -143,6 +160,6 @@ def train_text_classifier(
     if user_input.lower() == 's':
         sort_and_save_data(df_train)
     elif user_input.lower() == 'y':
-        train_and_validate_model(df_train, nb_classifier_path, vectorizer_path)
+        train_and_validate_model(df_train, nb_classifier_path, vectorizer_path, language=language)
     else:
         queue_message("Script terminated. Run the script again and type 'y' or 's' when prompted.")

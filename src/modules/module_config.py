@@ -103,8 +103,23 @@ def load_config():
     config_path = os.path.join(base_dir, 'config.ini')  # Ensures it joins "src/config.ini"
     config.read(config_path)  # Should correctly read "src/config.ini"
 
+    # === Language toggle (en/ko) ===
+    # Master switch in [CHAR]. Language-specific keys use a "<key>_<language>" suffix.
+    # _lang_get() picks the suffixed key if present, else the plain key, else fallback.
+    # This means an existing config without any _ko keys still behaves exactly as before
+    # (defaults to English), so reverting is just: language = en
+    language = config.get('CHAR', 'language', fallback='en').strip().lower()
+
+    def _lang_get(section, key, fallback=None):
+        lang_key = f"{key}_{language}"
+        if config.has_option(section, lang_key):
+            return config.get(section, lang_key)
+        if config.has_option(section, key):
+            return config.get(section, key)
+        return fallback
+
     # Parse the persona.ini file
-    character_path = config.get("CHAR", "character_card_path")  # Get full path
+    character_path = _lang_get("CHAR", "character_card_path")  # Get full path (language-aware)
     character_name = os.path.splitext(os.path.basename(character_path))[0]  # Extract filename without extension
 
     persona_config = configparser.ConfigParser()
@@ -143,17 +158,17 @@ def load_config():
             "voicemovement": config['CONTROLS']['voicemovement'],         
         },
         "STT": {
-            "wake_word": config['STT']['wake_word'],
+            "wake_word": _lang_get('STT', 'wake_word'),
             "sensitivity": config['STT']['sensitivity'],
             "stt_processor": config['STT']['stt_processor'],
             "external_url": config['STT']['external_url'],
-            "whisper_model": config['STT']['whisper_model'],
-            "stt_language": config.get('STT', 'stt_language', fallback='en'),
-            "vosk_model": config['STT']['vosk_model'],
+            "whisper_model": _lang_get('STT', 'whisper_model'),
+            "stt_language": _lang_get('STT', 'stt_language', fallback=language),
+            "vosk_model": _lang_get('STT', 'vosk_model'),
             "use_indicators": config.getboolean('STT', 'use_indicators'),
             "vad_method": config['STT']['vad_method'],
             "speechdelay": int(config['STT']['speechdelay']),
-            "wake_responses_file": config.get(
+            "wake_responses_file": _lang_get(
                 'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
             ),
             "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='50')),
@@ -168,9 +183,10 @@ def load_config():
             "max_recording_frames": int(config.get('STT', 'max_recording_frames', fallback='100')),
         },
         "CHAR": {
-            "character_card_path": config['CHAR']['character_card_path'],
-            "user_name": config['CHAR']['user_name'],
-            "user_details": config['CHAR']['user_details'],
+            "language": language,
+            "character_card_path": _lang_get('CHAR', 'character_card_path'),
+            "user_name": _lang_get('CHAR', 'user_name'),
+            "user_details": _lang_get('CHAR', 'user_details'),
             "traits": persona_traits,  # Include the traits from persona.ini
         },
         "LLM": {
@@ -184,8 +200,8 @@ def load_config():
             "temperature": float(config['LLM']['temperature']),
             "top_p": float(config['LLM']['top_p']),
             "seed": int(config['LLM']['seed']),
-            "systemprompt": config['LLM']['systemprompt'],
-            "instructionprompt": config['LLM']['instructionprompt'],
+            "systemprompt": _lang_get('LLM', 'systemprompt'),
+            "instructionprompt": _lang_get('LLM', 'instructionprompt'),
         },
         "VISION": {
             "server_hosted": config.getboolean('VISION', 'server_hosted'),
@@ -197,13 +213,13 @@ def load_config():
             "storepath": os.path.join(os.getcwd(), config['EMOTION']['storepath']),
         },
         "TTS": TTSConfig.from_config_dict({
-            "ttsoption": config['TTS']['ttsoption'],
+            "ttsoption": _lang_get('TTS', 'ttsoption'),
             "azure_api_key": os.getenv('AZURE_API_KEY'),
             "elevenlabs_api_key": os.getenv('ELEVENLABS_API_KEY'),
             "azure_region": config['TTS']['azure_region'],
             "ttsurl": config['TTS']['ttsurl'],
             "toggle_charvoice": config.getboolean('TTS', 'toggle_charvoice'),
-            "tts_voice": config['TTS']['tts_voice'],
+            "tts_voice": _lang_get('TTS', 'tts_voice'),
             "voice_id": config['TTS']['voice_id'],
             "model_id": config['TTS']['model_id'],
             "voice_only": config.getboolean('TTS', 'voice_only'),
@@ -224,6 +240,12 @@ def load_config():
             "url": config['HOME_ASSISTANT']['url'],
             "ha_skip_llm": config.get('HOME_ASSISTANT', 'ha_skip_llm', fallback='true'),
             "HA_TOKEN": os.getenv('HA_TOKEN'),
+        },
+        "VOLUME": {
+            # amixer simple-control name. USB DACs often expose 'PCM' instead of 'Master'.
+            "control": config.get('VOLUME', 'control', fallback='Master'),
+            # ALSA card index/name for `amixer -c <card>`. Empty = default card.
+            "card": config.get('VOLUME', 'card', fallback=''),
         },
         "DISCORD": {
             "TOKEN": os.getenv('DISCORD_TOKEN'),

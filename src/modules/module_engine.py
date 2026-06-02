@@ -48,11 +48,22 @@ from modules.module_messageQue import queue_message
 
 # === Constants ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Move up to "src"
-MODEL_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/naive_bayes_model.pkl')
-VECTORIZER_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/module_engine_model.pkl')
-TRAINING_DATA_PATH = os.path.join(BASE_DIR, 'engine/training/training_data.csv')
 
 CONFIG = load_config()
+
+# === Language-aware NB model / training data paths ===
+# English ('en') keeps the original filenames untouched, so reverting to English
+# requires no retraining. Other languages get a "<name>_<lang>" suffix and their
+# own training CSV + pickle files. Missing pickles are trained on first run below.
+LANGUAGE = CONFIG['CHAR'].get('language', 'en')
+if LANGUAGE == 'en':
+    MODEL_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/naive_bayes_model.pkl')
+    VECTORIZER_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/module_engine_model.pkl')
+    TRAINING_DATA_PATH = os.path.join(BASE_DIR, 'engine/training/training_data.csv')
+else:
+    MODEL_FILENAME = os.path.join(BASE_DIR, f'engine/pickles/naive_bayes_model_{LANGUAGE}.pkl')
+    VECTORIZER_FILENAME = os.path.join(BASE_DIR, f'engine/pickles/module_engine_model_{LANGUAGE}.pkl')
+    TRAINING_DATA_PATH = os.path.join(BASE_DIR, f'engine/training/training_data_{LANGUAGE}.csv')
 
 #mode to use Naive Bayes or LLM for function calling
 mode = "NB"
@@ -67,9 +78,14 @@ try:
     tfidf_vectorizer = joblib.load(VECTORIZER_FILENAME)
 
 except FileNotFoundError as e:
-    # Attempt to train models if files are missing
+    # Attempt to train models if files are missing (language-aware paths)
     import module_engineTrainer
-    module_engineTrainer.train_text_classifier()
+    module_engineTrainer.train_text_classifier(
+        training_data_path=TRAINING_DATA_PATH,
+        nb_classifier_path=MODEL_FILENAME,
+        vectorizer_path=VECTORIZER_FILENAME,
+        language=LANGUAGE,
+    )
     try:
         nb_classifier = joblib.load(MODEL_FILENAME)
         tfidf_vectorizer = joblib.load(VECTORIZER_FILENAME)

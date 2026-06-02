@@ -1,0 +1,211 @@
+query,label
+오늘 날씨 어때?,Weather
+지금 밖에 추워?,Weather
+내일 비 와?,Weather
+오늘 우산 챙겨야 해?,Weather
+이번 주 날씨 어때?,Weather
+오늘 기온 몇 도야?,Weather
+주말에 날씨 어떨까?,Weather
+지금 미세먼지 어때?,Weather
+내일 눈 와?,Weather
+오늘 많이 더워?,Weather
+바람 많이 불어?,Weather
+오늘 습도 높아?,Weather
+평택 날씨 알려줘,Weather
+서울 날씨 어때?,Weather
+오늘 뉴스 좀 알려줘,News
+최신 뉴스 헤드라인 읽어줘,News
+요즘 무슨 일 있어?,News
+오늘 주요 뉴스 뭐야?,News
+스포츠 소식 알려줘,News
+최신 연예 뉴스 알려줘,News
+오늘 속보 있어?,News
+경제 뉴스 알려줘,News
+요즘 핫한 뉴스 뭐야?,News
+정치 뉴스 알려줘,News
+오늘 톱뉴스 뭐야?,News
+새로운 소식 있어?,News
+오늘의 헤드라인 읽어줘,News
+방금 들어온 뉴스 있어?,News
+비트코인 지금 얼마야?,Search
+테슬라 주가 검색해줘,Search
+환율 좀 찾아줘,Search
+구글에서 검색해줘,Search
+지금 서울 시간 몇 시야?,Search
+이거 인터넷에 찾아봐줘,Search
+달러 환율 알려줘,Search
+삼성전자 주가 얼마야?,Search
+지하철 운행 정보 찾아줘,Search
+항공편 상태 검색해줘,Search
+요즘 인기 검색어 뭐야?,Search
+이거 검색해줘,Search
+금값 지금 얼마야?,Search
+환율 검색해줘,Search
+이거 뭐야 봐봐,Vision
+이것 좀 봐줘,Vision
+카메라로 이거 봐,Vision
+지금 뭐 보여?,Vision
+앞에 뭐 있어?,Vision
+이 사진 분석해줘,Vision
+내가 뭐 들고 있게?,Vision
+이거 무슨 물건이야?,Vision
+화면에 뭐 보여?,Vision
+이 장면 설명해줘,Vision
+이거 한번 찍어봐,Vision
+지금 보이는 거 말해줘,Vision
+이거 알아보겠어?,Vision
+앞에 있는 거 봐봐,Vision
+강아지 그림 그려줘,SDmodule-Generate
+공원에 있는 강아지 그려줘,SDmodule-Generate
+멋진 비행기 그림 그려줘,SDmodule-Generate
+피자 그림 그려줘,SDmodule-Generate
+판타지 캐릭터 디자인해줘,SDmodule-Generate
+풍경화 하나 그려줘,SDmodule-Generate
+고양이 만화 그려줘,SDmodule-Generate
+로고 하나 만들어줘,SDmodule-Generate
+바다 그림 그려줘,SDmodule-Generate
+용 그림 그려줘,SDmodule-Generate
+우주 그림 그려줘,SDmodule-Generate
+초상화 하나 그려줘,SDmodule-Generate
+귀여운 강아지 그림 만들어줘,SDmodule-Generate
+멋진 풍경 이미지 생성해줘,SDmodule-Generate
+앞으로 두 걸음 가,Move
+왼쪽으로 돌아,Move
+오른쪽으로 돌아,Move
+한 걸음 앞으로 가,Move
+뒤로 세 걸음 가,Move
+포즈 취해봐,Move
+포즈 풀어,Move
+일어서,Move
+앞으로 가,Move
+뒤로 가,Move
+왼쪽으로 세 번 돌아,Move
+제자리에서 돌아,Move
+오른쪽으로 두 번 돌아,Move
+앞으로 다섯 걸음 가,Move
+볼륨 키워,Volume
+소리 줄여,Volume
+조용히 해,Volume
+입 다물어,Volume
+음소거 해,Volume
+볼륨 올려,Volume
+소리 좀 낮춰,Volume
+볼륨 오십으로 해줘,Volume
+조용히 좀 해,Volume
+소리 최대로 해,Volume
+음소거 해제,Volume
+너무 시끄러워,Volume
+소리 키워줘,Volume
+볼륨 내려,Volume
+유머 수치를 칠십으로 올려,Persona
+좀 더 진지해져봐,Persona
+유머 좀 낮춰,Persona
+공감 능력을 육십으로 올려,Persona
+좀 더 솔직해져,Persona
+자신감 수치 올려줘,Persona
+좀 더 예의있게 해줘,Persona
+장난기 좀 줄여,Persona
+좀 더 친절해져,Persona
+호기심 수치 올려,Persona
+좀 더 차분해져,Persona
+정직함을 구십으로 설정해,Persona
+사교성 수치 높여줘,Persona
+좀 더 까불어봐,Persona
+불 켜줘,Home_Assistant
+불 꺼줘,Home_Assistant
+거실 불 켜줘,Home_Assistant
+방 불 꺼줘,Home_Assistant
+에어컨 켜줘,Home_Assistant
+히터 꺼줘,Home_Assistant
+조명 어둡게 해,Home_Assistant
+온도 이십이도로 맞춰줘,Home_Assistant
+티비 꺼줘,Home_Assistant
+음악 틀어줘,Home_Assistant
+커튼 닫아줘,Home_Assistant
+문 잠가줘,Home_Assistant
+선풍기 켜줘,Home_Assistant
+전등 꺼줘,Home_Assistant
+안녕,Chat
+잘 지냈어?,Chat
+오늘 기분 어때?,Chat
+넌 누구야?,Chat
+재밌는 얘기 해줘,Chat
+내 이름이 뭐게?,Chat
+심심해,Chat
+고마워,Chat
+사랑해,Chat
+뭐 하고 있어?,Chat
+배고파,Chat
+좋은 아침이야,Chat
+농담 하나 해줘,Chat
+오늘 하루 어땠어?,Chat
+잘 있어,Goodbye
+안녕히 가,Goodbye
+나중에 봐,Goodbye
+이만 갈게,Goodbye
+또 보자,Goodbye
+잘 자,Goodbye
+다음에 또 봐,Goodbye
+이제 그만,Goodbye
+그만하자,Goodbye
+바이바이,Goodbye
+수고했어,Goodbye
+이따 봐,Goodbye
+먼저 갈게,Goodbye
+잘 있어 다음에 봐,Goodbye
+날씨,Weather
+오늘날씨,Weather
+날씨 어때,Weather
+오늘 날씨좀,Weather
+지금 날씨 어떰?,Weather
+밖에 추워?,Weather
+밖에 많이 더워?,Weather
+비 와?,Weather
+내일 비 올까?,Weather
+우산 챙겨야 돼?,Weather
+오늘 몇 도야?,Weather
+지금 기온 알려줘,Weather
+미세먼지 어떰?,Weather
+날씨 좀 알려줘,Weather
+검색해줘,Search
+이거 찾아줘,Search
+구글링 해줘,Search
+비트코인 얼마야?,Search
+환율 얼마야?,Search
+달러 얼마야?,Search
+주가 검색해줘,Search
+테슬라 주가 알려줘,Search
+지금 몇 시야?,Search
+서울 지금 몇 시야?,Search
+인터넷에 찾아봐,Search
+이거 좀 검색,Search
+구글에 검색해봐,Search
+이거 인터넷에 찾아줘,Search
+이거 봐,Vision
+이거 봐봐,Vision
+이거 뭐야 봐,Vision
+이것 좀 봐,Vision
+앞에 뭐 있어?,Vision
+뭐 보여?,Vision
+카메라 켜서 봐,Vision
+이거 뭔지 알아?,Vision
+화면 봐봐,Vision
+내 손에 뭐 있게?,Vision
+이 물건 뭐야?,Vision
+지금 뭐 보여?,Vision
+이거 한번 찍어,Vision
+사진 분석해,Vision
+볼륨 키워,Volume
+볼륨 올려,Volume
+볼륨 줄여,Volume
+볼륨 내려,Volume
+소리 키워,Volume
+소리 줄여,Volume
+소리 낮춰,Volume
+소리 높여,Volume
+조용히,Volume
+조용,Volume
+음소거,Volume
+볼륨업,Volume
+볼륨 다운,Volume
+소리 좀 키워줘,Volume
