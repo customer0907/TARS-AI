@@ -291,6 +291,9 @@ def _weather_prediction_allowed(user_input, predicted_class):
     return False
 
 
+# Labels that mean "no external tool" — not registered in FUNCTION_REGISTRY.
+_NO_TOOL_CLASSES = frozenset({"Chat", "Goodbye"})
+
 def check_for_module(user_input):
     """
     Determines the appropriate module to handle the user's input and invokes it.
@@ -306,6 +309,9 @@ def check_for_module(user_input):
 
     predicted_class, probability = predict_class(user_input)
     if not predicted_class:
+        return "None"
+
+    if predicted_class in _NO_TOOL_CLASSES:
         return "None"
 
     if not _weather_prediction_allowed(user_input, predicted_class):
@@ -347,10 +353,10 @@ def predict_class_nb(user_input):
     if max_probability < 0.75:
         return None, max_probability
 
-    # Format the value as a percentage with 2 decimal places
-    formatted_probability = "{:.2f}%".format(max_probability * 100)
-    queue_message(f"TOOL: Using Tool {predicted_class} ({formatted_probability})")
-    generate_tts_audio("processing, processing, processing", CONFIG['TTS']['ttsoption'], CONFIG['TTS']['azure_api_key'], CONFIG['TTS']['azure_region'], CONFIG['TTS']['ttsurl'], CONFIG['TTS']['toggle_charvoice'], CONFIG['TTS']['tts_voice'])
+    if predicted_class not in _NO_TOOL_CLASSES:
+        formatted_probability = "{:.2f}%".format(max_probability * 100)
+        queue_message(f"TOOL: Using Tool {predicted_class} ({formatted_probability})")
+        generate_tts_audio("processing, processing, processing", CONFIG['TTS']['ttsoption'], CONFIG['TTS']['azure_api_key'], CONFIG['TTS']['azure_region'], CONFIG['TTS']['ttsurl'], CONFIG['TTS']['toggle_charvoice'], CONFIG['TTS']['tts_voice'])
 
     return predicted_class, max_probability
 
