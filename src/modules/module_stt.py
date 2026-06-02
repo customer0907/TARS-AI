@@ -91,11 +91,8 @@ class STTManager:
         self._stt_debug_t0 = time.time()
 
     def _stt_debug(self, msg):
-        if not self.stt_debug:
-            return
-        self._clear_silence_bar(finish_line=True)
-        elapsed = time.time() - self._stt_debug_t0
-        print(f"[STT +{elapsed:6.2f}s] {msg}", flush=True)
+        """Verbose STT pipeline logs (disabled for clean USER/TARS console)."""
+        return
 
     def _parse_wake_words(self, wake_raw):
         """Comma-separated wake phrases, e.g. amy,yooni,hey tar."""
@@ -409,14 +406,8 @@ class STTManager:
 
 # Progress bar
     def _update_silence_bar(self, frames, max_frames):
-        """In-place silence bar (same line, does not erase USER/TARS above)."""
-        bar_length = 10
-        progress = int((frames / max_frames) * bar_length)
-        filled = "#" * progress
-        empty = "-" * (bar_length - progress)
-        bar = f"[SILENCE: {filled}{empty}] {frames}/{max_frames}"
-        print(f"\r{bar}", end="", flush=True)
-        self._silence_bar_visible = True
+        """Silence progress bar (disabled for clean console)."""
+        return
 
     def _clear_silence_bar(self, finish_line=False):
         if not self._silence_bar_visible:
@@ -603,7 +594,6 @@ class STTManager:
         """
         try:
             while self.running:
-                print("STT loop running...")
                 if self.shutdown_event.is_set():
                     break
                 if self._detect_wake_word():
@@ -667,10 +657,8 @@ class STTManager:
                     latency='high',
                     device=mic_index
                 ) as stream:
-                    print("InputStream opened successfully")
                     while self.running and not self.shutdown_event.is_set():
                         if time.time() - last_heartbeat > 60:
-                            print("DEBUG: Waiting for wake word...")
                             last_heartbeat = time.time()
 
                         data, overflowed = stream.read(4000)
@@ -695,19 +683,18 @@ class STTManager:
                         if recognizer.AcceptWaveform(data.tobytes()):
                             result = json.loads(recognizer.Result())
                             text = result.get("text", "").lower()
-                            if text:
-                                print(f"DEBUG: Vosk recognized text: {text}")
                             if self.WAKE_WORDS and any(w in text for w in self.WAKE_WORDS):
                                 if self.config['STT']['use_indicators']:
                                     self.play_beep(1200, 0.1, 44100, 0.8)
                                 wake_response = self._pick_wake_response()
                                 break
+                            if text:
+                                print(f"DEBUG: waiting wake word: {text}", flush=True)
                             last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
                             ptext = partial.get("partial", "").strip().lower()
-                            if ptext and ptext != last_partial and len(ptext) > 2:
-                                print(f"DEBUG: Vosk partial: {ptext}")
+                            if ptext and ptext != last_partial:
                                 last_partial = ptext
 
             except Exception as e:
@@ -722,17 +709,10 @@ class STTManager:
 
         if wake_response:
             label = wake_response.get('text', wake_response) if isinstance(wake_response, dict) else wake_response
-            audio_path = wake_response.get('audio_path') if isinstance(wake_response, dict) else None
             print(f"TARS: {label}", flush=True)
-            if audio_path:
-                self._stt_debug(f"wake play text='{label}' file={os.path.basename(audio_path)}")
-            else:
-                self._stt_debug(f"wake TTS text='{label}'")
             self._release_audio_input(pause=0.05)
             if self.wake_word_callback:
-                t0 = time.time()
                 self.wake_word_callback(wake_response)
-                self._stt_debug(f"wake audio done ({time.time() - t0:.2f}s)")
             return True
 
         return False
@@ -743,7 +723,6 @@ class STTManager:
         Process a user utterance after wake word detection.
         Returns True if speech was transcribed and handled.
         """
-        print(f"\nSTAT: Listening...")
         self._stt_debug(f"transcribe start processor={self.config['STT'].get('stt_processor')}")
         result = None
         try:

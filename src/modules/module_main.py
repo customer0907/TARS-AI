@@ -132,14 +132,8 @@ def utterance_callback(message):
             and ha_skip_llm
             and map_prompt_to_ha_service(user_text)
         ):
-            queue_message("TOOL: HA keyword match (skip LLM/TTS)")
-            t0 = time.time()
-            if stt_manager and stt_manager.stt_debug:
-                stt_manager._stt_debug("HA shortcut: skip LLM/TTS")
             try:
                 send_prompt_to_homeassistant(user_text)
-                if stt_manager and stt_manager.stt_debug:
-                    stt_manager._stt_debug(f"HA shortcut done ({time.time() - t0:.2f}s)")
             except Exception as e:
                 queue_message(f"ERROR: HA shortcut failed: {e}")
             else:
@@ -147,48 +141,26 @@ def utterance_callback(message):
                     stt_manager._release_audio_input(pause=0.05)
                 return
             # HA failed → fall through to LLM
-        
-        # Process the message using process_completion
-        t0 = time.time()
-        if stt_manager and stt_manager.stt_debug:
-            stt_manager._stt_debug("LLM process_completion start")
-        reply = process_completion(user_text)
-        if stt_manager and stt_manager.stt_debug:
-            stt_manager._stt_debug(f"LLM process_completion done ({time.time() - t0:.2f}s)")
-        print(f"DEBUG: Generated reply = {reply}")
 
-        # Extract the <think> block if present
+        reply = process_completion(user_text)
+
         try:
             match = re.search(r"<think>(.*?)</think>", reply, re.DOTALL)
             thoughts = match.group(1).strip() if match else ""
-            
-            # Remove the <think> block and clean up trailing whitespace/newlines
             reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
-            print(f"DEBUG: Final TTS text = {reply}")
         except Exception:
             thoughts = ""
 
-        # Debug output for thoughts
         if thoughts:
-            #queue_message(f"DEBUG: Thoughts\n{thoughts}")
             pass
 
-        # Stream the AI's reply
         queue_message(f"TARS: {reply}")
 
-        # Strip emoji and other symbols, but KEEP letters/digits/punct of any script.
-        # \w covers Unicode word chars (incl. Korean Hangul, CJK, accents...).
-        # Previous version was ASCII-only and would erase Korean entirely.
         reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
 
         if stt_manager:
             stt_manager._release_audio_input(pause=0.05)
-        if stt_manager and stt_manager.stt_debug:
-            stt_manager._stt_debug("TTS play_audio_chunks start")
-        t0 = time.time()
         asyncio.run(play_audio_chunks(reply, CONFIG['TTS']))
-        if stt_manager and stt_manager.stt_debug:
-            stt_manager._stt_debug(f"TTS play_audio_chunks done ({time.time() - t0:.2f}s)")
         if stt_manager:
             stt_manager._release_audio_input(pause=0.05)
 
