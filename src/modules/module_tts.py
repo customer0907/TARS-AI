@@ -270,8 +270,21 @@ async def play_audio_chunks(text, config):
 def play_audio_file(path):
     """Play a local audio file (wake clips). No network/TTS API call."""
     try:
-        data, samplerate = sf.read(path, dtype='float32')
-        sd.play(data, samplerate)
+        data, file_sr = sf.read(path, dtype='float32')
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+
+        out_device = sd.default.device[1]
+        if out_device is None or int(out_device) < 0:
+            out_device = sd.default.device[0]
+        out_info = sd.query_devices(out_device)
+        target_sr = int(out_info['default_samplerate'])
+
+        if int(file_sr) != target_sr:
+            data = librosa.resample(y=data, orig_sr=file_sr, target_sr=target_sr)
+            file_sr = target_sr
+
+        sd.play(data, int(file_sr), device=out_device)
         sd.wait()
     except Exception as e:
         queue_message(f"ERROR: Failed to play audio file {path}: {e}")

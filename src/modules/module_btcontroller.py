@@ -64,6 +64,7 @@ minusBtn = 49
 plusBtn = 24
 
 global gamepad_path
+gamepad_path = None
 toggle = True
 posevar = False
 
@@ -326,15 +327,19 @@ def start_controls():
     """
     Listen to gamepad events and execute actions based on button presses/releases and analog movements.
     """
-    # Retry loop for detecting the gamepad
+    global gamepad_path
     gamepad = None
     while gamepad is None:
+        if not gamepad_path:
+            if not find_controller(controller_name):
+                time.sleep(5)
+                continue
         try:
-            # Try to connect to the gamepad
             gamepad = evdev.InputDevice(gamepad_path)
             queue_message(f"LOAD: {gamepad.name} connected.")
-        except FileNotFoundError:
-            time.sleep(5)  # Wait before retrying
+        except (FileNotFoundError, OSError):
+            gamepad_path = None
+            time.sleep(5)
 
     # Define mappings for button events with actions
     button_map = {
