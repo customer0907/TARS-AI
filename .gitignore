@@ -178,3 +178,4 @@ memory/initial_memory.json
 memory/initial_memory.loaded
 ./tars.sh
 character/persona.ini
+src/logs/tars_diag.log

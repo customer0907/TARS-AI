@@ -42,6 +42,10 @@ max_empty_listen_attempts = 3
 # After wake/TTS: retry listen this many times if no speech, then Sleeping.
 stt_debug = false
 # Legacy flag; verbose [STT +Xs] timing logs are disabled in code for a clean console.
+wake_heartbeat_sec = 300
+# Wake-loop file heartbeat interval (logs/tars_diag.log). Console stays quiet.
+wake_watchdog_sec = 90
+# If stream.read blocks longer than this, force sd.stop() and reopen mic.
 max_recording_frames = 100
 # Max mic frames per utterance (~9s at 44100/4000). Was 35 (~3s), too short for Korean.
 whisper_timeout_sec = 45

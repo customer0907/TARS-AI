@@ -29,6 +29,10 @@ import concurrent.futures
 from typing import Callable, Optional
 from vosk import SetLogLevel
 from modules.module_messageQue import queue_message
+from modules.module_diag_log import init_diag_log, diag_log, get_diag_log_path
+
+# Wake-loop noise — file only, not console.
+_WAKE_CONSOLE_NOISE = frozenset({"huh", "uh", "um", "the", "a", "oh", "ah", "hm"})
 
 # Suppress Vosk logs by setting the log level to 0 (ERROR and above)
 SetLogLevel(-1)  # Adjust to 0 for minimal output or -1 to suppress all logs
@@ -86,6 +90,12 @@ class STTManager:
             self.config['STT'].get('stt_debug', 'true')
         ).lower() in ('true', '1', 'yes')
         self._stt_debug_t0 = time.time()
+        self._wake_last_read_ts = time.time()
+        self._in_wake_detect = False
+        self._wake_force_reopen = threading.Event()
+        self._watchdog_started = False
+        self._wake_heartbeat_sec = int(self.config['STT'].get('wake_heartbeat_sec', 300))
+        self._wake_watchdog_sec = int(self.config['STT'].get('wake_watchdog_sec', 90))
 
     def _stt_debug_reset(self):
         self._stt_debug_t0 = time.time()
@@ -347,11 +357,47 @@ class STTManager:
         return random.choice(pool)
 
 #Main Thread Calls
+    def _start_stt_watchdog(self):
+        """Detect blocked stream.read() and force PortAudio release."""
+
+        def run():
+            while self.running:
+                time.sleep(30)
+                if not self._in_wake_detect:
+                    continue
+                idle = time.time() - self._wake_last_read_ts
+                if idle >= self._wake_watchdog_sec:
+                    diag_log(
+                        f"WATCHDOG: no mic read for {idle:.1f}s "
+                        f"(threshold={self._wake_watchdog_sec}s) — sd.stop()"
+                    )
+                    queue_message(
+                        f"WARNING: STT mic hang ({int(idle)}s), forcing audio reopen"
+                    )
+                    self._wake_force_reopen.set()
+                    try:
+                        sd.stop()
+                    except Exception as e:
+                        diag_log(f"WATCHDOG: sd.stop failed: {e}")
+
+        threading.Thread(target=run, name="STTReadWatchdog", daemon=True).start()
+
+    def _log_wake_vosk_text(self, text: str):
+        if not text:
+            return
+        diag_log(f"vosk_final: {text!r}")
+        if text in _WAKE_CONSOLE_NOISE or len(text) < 3:
+            return
+        queue_message(f"INFO: waiting wake word: {text}")
+
     def start(self):
         """
         Start the STTManager in a separate thread.
         """
         self.running = True
+        if not self._watchdog_started:
+            self._start_stt_watchdog()
+            self._watchdog_started = True
         #self.thread = threading.Thread(
         #    target=self._stt_processing_loop, name="STTThread", daemon=True
         #)
@@ -583,6 +629,7 @@ class STTManager:
         """
         Main loop to detect wake words and process utterances.
         """
+        diag_log("STT processing loop started")
         try:
             while self.running:
                 if self.shutdown_event.is_set():
@@ -611,8 +658,11 @@ class STTManager:
                     self._release_audio_input()
                     self._stt_debug("wake session end")
         except Exception as e:
+            diag_log(f"STT processing loop exception: {e}")
             print(f"ERROR: Error in STT processing loop: {e}")
         finally:
+            self._in_wake_detect = False
+            diag_log("STT processing loop stopped")
             print(f"INFO: STT Manager stopped.")
 
 #Detect Wake
@@ -631,15 +681,19 @@ class STTManager:
         mic_index = self._get_input_device()
         last_heartbeat = time.time()
         wake_response = None
+        self._in_wake_detect = True
+        diag_log(f"wake_listen start mic_index={mic_index} wake_words={self.WAKE_WORDS}")
 
         while self.running and not self.shutdown_event.is_set() and wake_response is None:
             recognizer = self._new_wake_recognizer()
             last_partial = ""
             silent_reads = 0
             overflow_streak = 0
+            stream_opened_at = time.time()
 
             try:
                 self._release_audio_input()
+                diag_log(f"wake InputStream opening device={mic_index}")
                 with sd.InputStream(
                     samplerate=self.SAMPLE_RATE,
                     channels=1,
@@ -648,14 +702,36 @@ class STTManager:
                     latency='high',
                     device=mic_index
                 ) as stream:
+                    diag_log("wake InputStream opened")
                     while self.running and not self.shutdown_event.is_set():
-                        if time.time() - last_heartbeat > 60:
+                        if self._wake_force_reopen.is_set():
+                            self._wake_force_reopen.clear()
+                            diag_log("wake stream break: watchdog force reopen")
+                            break
+
+                        if time.time() - last_heartbeat >= self._wake_heartbeat_sec:
+                            idle = time.time() - self._wake_last_read_ts
+                            diag_log(
+                                f"HEARTBEAT wake_listen mic={mic_index} "
+                                f"silent_reads={silent_reads} "
+                                f"overflow_streak={overflow_streak} "
+                                f"sec_since_read={idle:.1f}"
+                            )
                             last_heartbeat = time.time()
 
+                        read_start = time.time()
                         data, overflowed = stream.read(4000)
+                        read_ms = (time.time() - read_start) * 1000
+                        self._wake_last_read_ts = time.time()
+                        if read_ms >= 3000:
+                            diag_log(f"SLOW stream.read {read_ms:.0f}ms")
+
                         if overflowed:
                             overflow_streak += 1
                             if overflow_streak >= MAX_OVERFLOW_STREAK:
+                                diag_log(
+                                    f"wake stream break: overflow_streak={overflow_streak}"
+                                )
                                 break
                         else:
                             overflow_streak = 0
@@ -668,35 +744,45 @@ class STTManager:
                             silent_reads = 0
 
                         if silent_reads >= MAX_SILENT_READS:
-                            print("WARNING: mic input dead, reopening stream.")
+                            diag_log(
+                                f"mic_input_dead silent_reads={silent_reads} "
+                                f"stream_age_sec={time.time() - stream_opened_at:.1f}"
+                            )
+                            queue_message("WARNING: mic input dead, reopening stream.")
                             break
 
                         if recognizer.AcceptWaveform(data.tobytes()):
                             result = json.loads(recognizer.Result())
                             text = result.get("text", "").lower()
                             if self.WAKE_WORDS and any(w in text for w in self.WAKE_WORDS):
+                                diag_log(f"wake_word MATCH text={text!r}")
                                 if self.config['STT']['use_indicators']:
                                     self.play_beep(1200, 0.1, 44100, 0.8)
                                 wake_response = self._pick_wake_response()
                                 break
-                            if text:
-                                queue_message(f"INFO: waiting wake word: {text}")
+                            self._log_wake_vosk_text(text)
                             last_partial = ""
                         else:
                             partial = json.loads(recognizer.PartialResult())
                             ptext = partial.get("partial", "").strip().lower()
                             if ptext and ptext != last_partial:
                                 last_partial = ptext
+                                diag_log(f"vosk_partial: {ptext!r}")
 
             except Exception as e:
+                diag_log(f"wake stream exception: {e!r}")
                 print(f"ERROR: Wake word detection stream failed: {e}")
                 self.mic_index = None
                 self._release_audio_input(pause=0.3)
                 try:
                     mic_index = self._get_input_device()
+                    diag_log(f"wake mic re-resolved index={mic_index}")
                 except Exception as dev_err:
+                    diag_log(f"wake mic re-resolve failed: {dev_err!r}")
                     print(f"ERROR: Could not re-open mic: {dev_err}")
                 time.sleep(2)
+
+        self._in_wake_detect = False
 
         if wake_response:
             label = wake_response.get('text', wake_response) if isinstance(wake_response, dict) else wake_response

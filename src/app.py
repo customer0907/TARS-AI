@@ -33,7 +33,8 @@ from modules.module_main import initialize_managers, wake_word_callback, utteran
 from modules.module_vision import initialize_blip
 from modules.module_llm import initialize_manager_llm
 import modules.module_chatui
-from modules.module_messageQue import queue_message  # 메시지 출력용
+from modules.module_messageQue import queue_message
+from modules.module_diag_log import init_diag_log, get_diag_log_path
 
 # === Constants and Globals ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,6 +66,8 @@ def start_discord_in_thread():
 if __name__ == "__main__":
     # Perform initial setup
     init_app()
+    diag_path = init_diag_log(BASE_DIR)
+    queue_message(f"LOAD: Diagnostic log: {diag_path}")
 
     # Create a shutdown event for global threads
     shutdown_event = threading.Event()
@@ -119,7 +122,4 @@ if __name__ == "__main__":
         stt_manager.stop()
         if bt_controller_thread:
             bt_controller_thread.join()
-        if speaker_stream:
-            speaker_stream.stop()
-            speaker_stream.close()
         queue_message(f"INFO: All threads and executor stopped gracefully.")
