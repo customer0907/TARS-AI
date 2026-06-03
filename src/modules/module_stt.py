@@ -96,6 +96,10 @@ class STTManager:
         self._watchdog_started = False
         self._wake_heartbeat_sec = int(self.config['STT'].get('wake_heartbeat_sec', 300))
         self._wake_watchdog_sec = int(self.config['STT'].get('wake_watchdog_sec', 90))
+        self._stream_read_timeout_sec = float(
+            self.config['STT'].get('stream_read_timeout_sec', 8)
+        )
+        self._watchdog_user_notified = False
 
     def _stt_debug_reset(self):
         self._stt_debug_t0 = time.time()
@@ -371,9 +375,11 @@ class STTManager:
                         f"WATCHDOG: no mic read for {idle:.1f}s "
                         f"(threshold={self._wake_watchdog_sec}s) — sd.stop()"
                     )
-                    queue_message(
-                        f"WARNING: STT mic hang ({int(idle)}s), forcing audio reopen"
-                    )
+                    if not self._watchdog_user_notified:
+                        queue_message(
+                            f"WARNING: STT mic hang ({int(idle)}s), forcing audio reopen"
+                        )
+                        self._watchdog_user_notified = True
                     self._wake_force_reopen.set()
                     try:
                         sd.stop()
@@ -431,6 +437,47 @@ class STTManager:
             print(f"WARNING: sd.stop() failed: {e}")
         if pause > 0:
             time.sleep(pause)
+
+    def _read_stream_frames(self, stream, frames, timeout_sec=None):
+        """
+        Read audio frames with a timeout so a blocked ALSA read cannot hang the STT thread.
+
+        Returns:
+            (data, overflowed, timed_out)
+        """
+        if timeout_sec is None:
+            timeout_sec = self._stream_read_timeout_sec
+
+        result_box = []
+
+        def _worker():
+            try:
+                result_box.append(stream.read(frames))
+            except Exception as exc:
+                result_box.append(exc)
+
+        reader = threading.Thread(target=_worker, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_sec)
+
+        if reader.is_alive():
+            diag_log(f"stream.read TIMEOUT after {timeout_sec}s — sd.stop()")
+            try:
+                sd.stop()
+            except Exception as e:
+                diag_log(f"stream.read timeout sd.stop failed: {e}")
+            return None, False, True
+
+        if not result_box:
+            return None, False, True
+
+        outcome = result_box[0]
+        if isinstance(outcome, Exception):
+            raise outcome
+
+        data, overflowed = outcome
+        self._watchdog_user_notified = False
+        return data, overflowed, False
 
     def _new_wake_recognizer(self):
         return KaldiRecognizer(self.vosk_model, self.SAMPLE_RATE)
@@ -720,9 +767,12 @@ class STTManager:
                             last_heartbeat = time.time()
 
                         read_start = time.time()
-                        data, overflowed = stream.read(4000)
+                        data, overflowed, read_timed_out = self._read_stream_frames(stream, 4000)
                         read_ms = (time.time() - read_start) * 1000
                         self._wake_last_read_ts = time.time()
+                        if read_timed_out:
+                            diag_log("wake stream break: read timeout")
+                            break
                         if read_ms >= 3000:
                             diag_log(f"SLOW stream.read {read_ms:.0f}ms")
 
@@ -854,8 +904,11 @@ class STTManager:
                         return None
 
                     t_read = time.time()
-                    data, overflowed = stream.read(4000)
+                    data, overflowed, read_timed_out = self._read_stream_frames(stream, 4000)
                     read_ms = (time.time() - t_read) * 1000
+                    if read_timed_out:
+                        diag_log("whisper: stream read timeout")
+                        return None
                     if read_ms > 300:
                         self._stt_debug(
                             f"whisper: SLOW stream.read {read_ms:.0f}ms "
@@ -981,7 +1034,10 @@ class STTManager:
         ) as stream:
 
             for i in range(50):  # Limit duration (~12.5 seconds)
-                data, _ = stream.read(4000)
+                data, _, read_timed_out = self._read_stream_frames(stream, 4000)
+                if read_timed_out:
+                    diag_log("vosk transcribe: stream read timeout")
+                    return None
                 data = self._amplify_audio(data)  # Apply amplification
 
                 is_silence, detected_speech, silent_frames = self._is_silence_detected(
@@ -1030,7 +1086,10 @@ class STTManager:
                     wf.setframerate(self.SAMPLE_RATE)
 
                     for _ in range(50):  # Limit maximum recording duration (~12.5 seconds)
-                        data, _ = stream.read(4000)
+                        data, _, read_timed_out = self._read_stream_frames(stream, 4000)
+                        if read_timed_out:
+                            diag_log("server transcribe: stream read timeout")
+                            return None
                         data = self._amplify_audio(data)  # Apply amplification
                         wf.writeframes(data.tobytes())
 
