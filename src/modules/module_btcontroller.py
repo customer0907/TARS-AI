@@ -65,6 +65,7 @@ plusBtn = 24
 
 global gamepad_path
 gamepad_path = None
+_controller_missing_logged = False
 toggle = True
 posevar = False
 
@@ -76,17 +77,25 @@ SECRET_CODE = [
 input_sequence = []
 
 def find_controller(controller_name):
-    global gamepad_path
+    global gamepad_path, _controller_missing_logged
     """
     Search for a controller by its name.
     """
     devices = [InputDevice(path) for path in list_devices()]
     for device in devices:
         if controller_name.lower() in device.name.lower():
-            queue_message(f"LOAD: Controller found: {device.name} at {device.path}")
+            if _controller_missing_logged:
+                queue_message(f"LOAD: Controller connected: {device.name}")
+            else:
+                queue_message(f"LOAD: Controller found: {device.name} at {device.path}")
+            _controller_missing_logged = False
             gamepad_path = device.path
             return device
-    queue_message(f"LOAD: {controller_name} Not found, Searching...")
+    if not _controller_missing_logged:
+        queue_message(
+            f"LOAD: {controller_name} not found; BT controls idle until connected."
+        )
+        _controller_missing_logged = True
     return None
 
 def check_secret_code(button_name):
@@ -447,8 +456,6 @@ def start_controls():
 
     # Clean up
     gamepad.close()
-
-device = find_controller(controller_name)
 
 #Delete this is for testing
 if __name__ == "__main__":
