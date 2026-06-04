@@ -130,11 +130,9 @@
     }
 
     function startAudioStream() {
-        if (audioStarted) {
-            return;
-        }
         audioStarted = true;
         firstChunkPlayed = false;
+        console.log("[TARS] Requesting /audio_stream …");
 
         fetch('/audio_stream')
             .then(response => {
@@ -157,6 +155,7 @@
                 audioPlayer.load();
 
                 audioPlayer.play().then(() => {
+                    console.log("[TARS] Playing TTS (muted=" + audioPlayer.muted + ")");
                     firstChunkPlayed = true;
                     audioPlayer.onended = function () {
                         setTimeout(() => {
@@ -497,7 +496,7 @@ function sendUserMessage(message, imageFile) {
     // Scroll to the bottom of the chat body to show the new message
     chatBody.scrollTop = chatBody.scrollHeight;
 
-
+    resetAudioStreamState();
     startAudioStream();
 }
 
