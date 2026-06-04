@@ -37,11 +37,23 @@ from modules.module_messageQue import queue_message
 from modules.module_elevenlabs_tags import strip_elevenlabs_tags
 
 
-def polish_ko_reply(text: str) -> str:
-    """Spoken-style cleanup for Korean voice replies (after LLM, before TTS)."""
+def polish_ko_reply(text: str, last_bot: str = "") -> str:
+    """Spoken-style cleanup + break consecutive [smug] / identical openings."""
     if not text:
         return text
     stripped = text.strip()
+    last_bot = (last_bot or "").strip()
+
+    if last_bot and re.match(r"^\[smug\]", stripped, re.IGNORECASE):
+        if re.match(r"^\[smug\]", last_bot, re.IGNORECASE):
+            stripped = re.sub(
+                r"^\[smug\]\s*",
+                "[mocking] ",
+                stripped,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
     stripped = re.sub(r'(?<![0-9])\.(?=\s|$)', '~', stripped)
     stripped = re.sub(r'~{2,}', '~', stripped)
     return re.sub(r'\s+', ' ', stripped).strip()

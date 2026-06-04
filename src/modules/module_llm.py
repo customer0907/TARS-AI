@@ -55,7 +55,10 @@ def get_completion(user_prompt, istext=True):
         response.raise_for_status()
         bot_reply = _extract_text(response.json(), istext)
         if CONFIG['CHAR'].get('language') == 'ko' and bot_reply:
-            bot_reply = polish_ko_reply(bot_reply)
+            last_bot = ""
+            if memory_manager and memory_manager.session_turns:
+                last_bot = memory_manager.session_turns[-1][1]
+            bot_reply = polish_ko_reply(bot_reply, last_bot)
 
         llm_process(user_prompt, bot_reply)
         return bot_reply

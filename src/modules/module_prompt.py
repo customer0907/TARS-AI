@@ -6,8 +6,41 @@ Utility module for building prompts for LLM backends.
 
 from datetime import datetime
 import os
+import re
 from modules.module_engine import check_for_module
 from modules.module_messageQue import queue_message
+
+_KO_TAG_ROTATION = (
+    "mocking", "condescending", "teasingly", "laughs harder", "giggle",
+    "sarcastic", "evil laugh", "cackle", "playful",
+)
+
+
+def _ko_variety_hint(memory_manager) -> str:
+    """Nudge LLM away from anchoring on the previous reply's tags and catchphrases."""
+    if not memory_manager or not getattr(memory_manager, "session_turns", None):
+        return ""
+    if not memory_manager.session_turns:
+        return ""
+
+    last_bot = memory_manager.session_turns[-1][1] or ""
+    last_tags = [t.lower() for t in re.findall(r"\[([^\]]+)\]", last_bot)]
+    lines = ["### This-turn variety (mandatory):"]
+
+    if last_tags:
+        banned = ", ".join(f"[{t}]" for t in last_tags[:3])
+        alts = ", ".join(f"[{t}]" for t in _KO_TAG_ROTATION if t not in last_tags[:2])
+        lines.append(
+            f"- Previous reply used {banned}. Do NOT reuse the same opening tag(s). "
+            f"Pick different tag(s) e.g. {alts}, or use zero tags."
+        )
+    if "[smug]" in last_bot.lower() or (last_tags and last_tags[0] == "smug"):
+        lines.append("- Do NOT start with [smug] this turn.")
+
+    if len(lines) <= 1:
+        return ""
+    return "\n".join(lines) + "\n---\n\n"
+
 
 def build_prompt(user_prompt, character_manager, memory_manager, config, debug=False):
     """
@@ -37,12 +70,14 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
         persona_traits = "\n".join(
             [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
         )
+        variety = _ko_variety_hint(memory_manager)
         base_prompt = (
             f"### Interaction Context:\n---\n"
             f"User: {user_name}\n"
             f"Character: {char_name}\n"
             f"{user_details}\n"
             f"{dtg}\n---\n\n"
+            f"{variety}"
             f"### {char_name} Settings (sliders):\n{persona_traits}\n---\n\n"
         )
     else:
