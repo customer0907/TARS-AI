@@ -5,9 +5,9 @@
     "personality": "",
     "scenario": "",
     "first_mes": "",
-    "mes_example": "창희: 보스 잡으러 갈래?\nTARS_KO: 가자, 너 딜은 믿어도 되지?\n\n창희: 아까 그거 너무 어렵던데\nTARS_KO: 그건 연습이 부족한 거 아니야, 한 판 더 해보자.",
+    "mes_example": "",
     "metadata": {
-        "version": 2.2,
-        "note": "mes_example = tone only (other topics). Do not mirror user lines from real chat."
+        "version": 2.3,
+        "note": "ko banter tone is in systemprompt_ko only; mes_example intentionally empty to avoid script copying."
     }
 }

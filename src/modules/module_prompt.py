@@ -138,8 +138,11 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
         available_tokens -= memory_length
         #queue_message(f"Tokens after short term {available_tokens}")
 
-    # Add example dialog when the character card provides mes_example
-    use_examples = bool(character_manager.example_dialogue)
+    # ko: never inject mes_example (models copy scripted lines). en: use card examples.
+    use_examples = (
+        config['CHAR'].get('language', 'en') != 'ko'
+        and bool(character_manager.example_dialogue)
+    )
     if available_tokens > 0 and use_examples:
         example_length = memory_manager.token_count(character_manager.example_dialogue).get('length', 0)
         if example_length <= available_tokens:
