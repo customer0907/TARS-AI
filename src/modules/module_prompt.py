@@ -143,7 +143,10 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
     if available_tokens > 0 and use_examples:
         example_length = memory_manager.token_count(character_manager.example_dialogue).get('length', 0)
         if example_length <= available_tokens:
-            example_dialog = f"### Example Dialog:\n{character_manager.example_dialogue}\n---\n"
+            example_dialog = (
+                f"### Example Dialog (tone reference only; never copy lines verbatim):\n"
+                f"{character_manager.example_dialogue}\n---\n"
+            )
 
     # Append memory and examples to the prompt
     return (
