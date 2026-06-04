@@ -448,11 +448,17 @@ def audio_stream():
         Generate text-to-speech audio chunks and store them in the dictionary.
         """
         index = 0
-        async for chunk in generate_tts_audio(final_text, CONFIG['TTS']['ttsoption']):
+        chunk_count = 0
+        async for chunk in generate_tts_audio(final_text, CONFIG['TTS']):
             audio_chunks_dict[index] = chunk.getvalue()  # Store chunk with its order
             index += 1
+            chunk_count += 1
 
-        #queue_message(f"Generated {len(audio_chunks_dict)} chunks.")
+        if chunk_count == 0:
+            queue_message(
+                f"ERROR: ChatUI TTS produced no audio (engine={CONFIG['TTS']['ttsoption']}). "
+                "Check API key / ElevenLabs quota / console."
+            )
         audio_chunks_dict[index] = None  # Mark end of chunks
 
     # Run the async generator in a background thread
@@ -469,7 +475,10 @@ def audio_stream():
     waited = 0
     while 0 not in audio_chunks_dict:
         if waited >= max_wait_time:
-            #queue_message("First chunk did not generate in time.")
+            queue_message(
+                "ERROR: ChatUI audio_stream timeout (no MP3 in 5s). "
+                "TTS failed or still generating."
+            )
             return Response(status=204)
         time.sleep(0.1)
         waited += 0.1

@@ -124,19 +124,31 @@
     let audioStarted = false; // Prevent multiple requests
     let firstChunkPlayed = false; // Track if first chunk already played
 
+    function resetAudioStreamState() {
+        audioStarted = false;
+        firstChunkPlayed = false;
+    }
+
     function startAudioStream() {
         if (audioStarted) {
-            // console.log("Audio stream already started, ignoring duplicate request.");
-            return; // 🚨 Prevent duplicate requests
+            return;
         }
-        audioStarted = true; // ✅ Mark that audio has started
-        firstChunkPlayed = false; // ✅ Reset for new message
+        audioStarted = true;
+        firstChunkPlayed = false;
 
         fetch('/audio_stream')
-            .then(response => response.blob())
+            .then(response => {
+                if (!response.ok || response.status === 204) {
+                    console.error("Audio stream failed:", response.status);
+                    resetAudioStreamState();
+                    return null;
+                }
+                return response.blob();
+            })
             .then(blob => {
-                if (blob.size === 0) {
-                    // console.error("Received an empty first chunk!");
+                if (!blob || blob.size === 0) {
+                    console.error("Received an empty first TTS chunk (check Pi console for TTS errors).");
+                    resetAudioStreamState();
                     return;
                 }
 
@@ -145,21 +157,21 @@
                 audioPlayer.load();
 
                 audioPlayer.play().then(() => {
-                    // console.log("Playing first MP3 chunk...");
-                    firstChunkPlayed = true; // ✅ Mark first chunk as played
-
-                    // ✅ Wait for first chunk to finish before fetching next
+                    firstChunkPlayed = true;
                     audioPlayer.onended = function () {
-                        // console.log("First chunk finished, requesting next...");
                         setTimeout(() => {
                             playNextAudioChunk();
                         }, 500);
                     };
                 }).catch(error => {
                     console.error("Error playing first MP3 chunk:", error);
+                    resetAudioStreamState();
                 });
             })
-            .catch(error => console.error("Error starting MP3 audio stream:", error));
+            .catch(error => {
+                console.error("Error starting MP3 audio stream:", error);
+                resetAudioStreamState();
+            });
     }
 
     function playNextAudioChunk() {
