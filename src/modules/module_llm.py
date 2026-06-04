@@ -16,6 +16,7 @@ from modules.module_config import load_config
 from modules.module_prompt import build_prompt
 
 from modules.module_messageQue import queue_message
+from modules.module_tts import polish_ko_reply
 
 # === Constants and Globals ===
 CONFIG = load_config()
@@ -53,7 +54,9 @@ def get_completion(user_prompt, istext=True):
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
         bot_reply = _extract_text(response.json(), istext)
-        
+        if CONFIG['CHAR'].get('language') == 'ko' and bot_reply:
+            bot_reply = polish_ko_reply(bot_reply)
+
         llm_process(user_prompt, bot_reply)
         return bot_reply
     
