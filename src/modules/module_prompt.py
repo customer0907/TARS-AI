@@ -32,8 +32,11 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
     language = config['CHAR'].get('language', 'en')
     user_details = config['CHAR'].get('user_details', '')
 
-    # ko mode: config.ini systemprompt/instructionprompt only (no JSON card duplication).
+    # ko mode: config.ini prompts + persona.ini traits (+ mes_example when set).
     if language == 'ko':
+        persona_traits = "\n".join(
+            [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
+        )
         base_prompt = (
             f"System: {config['LLM']['systemprompt']}\n\n"
             f"### Instruction:\n"
@@ -43,6 +46,7 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
             f"Character: {char_name}\n"
             f"{user_details}\n"
             f"{dtg}\n---\n\n"
+            f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
         )
     else:
         persona_traits = "\n".join(
@@ -134,11 +138,8 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
         available_tokens -= memory_length
         #queue_message(f"Tokens after short term {available_tokens}")
 
-    # Add example dialog only if there's space remaining (English roleplay cards only)
-    use_examples = (
-        config['CHAR'].get('language', 'en') != 'ko'
-        and character_manager.example_dialogue
-    )
+    # Add example dialog when the character card provides mes_example
+    use_examples = bool(character_manager.example_dialogue)
     if available_tokens > 0 and use_examples:
         example_length = memory_manager.token_count(character_manager.example_dialogue).get('length', 0)
         if example_length <= available_tokens:
