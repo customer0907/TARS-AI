@@ -124,29 +124,19 @@
     let audioStarted = false; // Prevent multiple requests
     let firstChunkPlayed = false; // Track if first chunk already played
 
-    function resetAudioStreamState() {
-        audioStarted = false;
-        firstChunkPlayed = false;
-    }
-
     function startAudioStream() {
-        audioStarted = true;
-        firstChunkPlayed = false;
-        console.log("[TARS] Requesting /audio_stream …");
+        if (audioStarted) {
+            // console.log("Audio stream already started, ignoring duplicate request.");
+            return; // 🚨 Prevent duplicate requests
+        }
+        audioStarted = true; // ✅ Mark that audio has started
+        firstChunkPlayed = false; // ✅ Reset for new message
 
         fetch('/audio_stream')
-            .then(response => {
-                if (!response.ok || response.status === 204) {
-                    console.error("Audio stream failed:", response.status);
-                    resetAudioStreamState();
-                    return null;
-                }
-                return response.blob();
-            })
+            .then(response => response.blob())
             .then(blob => {
-                if (!blob || blob.size === 0) {
-                    console.error("Received an empty first TTS chunk (check Pi console for TTS errors).");
-                    resetAudioStreamState();
+                if (blob.size === 0) {
+                    // console.error("Received an empty first chunk!");
                     return;
                 }
 
@@ -155,22 +145,21 @@
                 audioPlayer.load();
 
                 audioPlayer.play().then(() => {
-                    console.log("[TARS] Playing TTS (muted=" + audioPlayer.muted + ")");
-                    firstChunkPlayed = true;
+                    // console.log("Playing first MP3 chunk...");
+                    firstChunkPlayed = true; // ✅ Mark first chunk as played
+
+                    // ✅ Wait for first chunk to finish before fetching next
                     audioPlayer.onended = function () {
+                        // console.log("First chunk finished, requesting next...");
                         setTimeout(() => {
                             playNextAudioChunk();
                         }, 500);
                     };
                 }).catch(error => {
                     console.error("Error playing first MP3 chunk:", error);
-                    resetAudioStreamState();
                 });
             })
-            .catch(error => {
-                console.error("Error starting MP3 audio stream:", error);
-                resetAudioStreamState();
-            });
+            .catch(error => console.error("Error starting MP3 audio stream:", error));
     }
 
     function playNextAudioChunk() {
@@ -496,7 +485,7 @@ function sendUserMessage(message, imageFile) {
     // Scroll to the bottom of the chat body to show the new message
     chatBody.scrollTop = chatBody.scrollHeight;
 
-    resetAudioStreamState();
+
     startAudioStream();
 }
 
