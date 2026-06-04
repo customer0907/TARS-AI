@@ -34,48 +34,17 @@ try:
 except Exception:
     text_to_speech_with_pipelining_melotts = None
 from modules.module_messageQue import queue_message
-
-# ElevenLabs v3 audio tags — stripped for console, kept for TTS synthesis.
-ELEVENLABS_AUDIO_TAGS = re.compile(
-    r'\s*\[(?:laughs harder|laughs|giggle|cackle|evil laugh|sighs|whispers|softly|'
-    r'surprised|excited|curious|sarcastic|teasingly|mocking|smug|condescending)\]\s*',
-    re.IGNORECASE,
-)
-
-_last_ko_eleven_tag = None
+from modules.module_elevenlabs_tags import strip_elevenlabs_tags
 
 
 def polish_ko_reply(text: str) -> str:
     """Spoken-style cleanup for Korean voice replies (after LLM, before TTS)."""
-    global _last_ko_eleven_tag
     if not text:
         return text
-
     stripped = text.strip()
-    tag_match = re.match(r'^\[([^\]]+)\]\s*', stripped, re.IGNORECASE)
-    if tag_match:
-        tag = tag_match.group(1).lower()
-        if tag == 'teasingly' and _last_ko_eleven_tag == 'teasingly':
-            stripped = re.sub(r'^\[[^\]]+\]\s*', '', stripped, count=1, flags=re.IGNORECASE)
-            _last_ko_eleven_tag = None
-        else:
-            _last_ko_eleven_tag = tag
-    else:
-        _last_ko_eleven_tag = None
-
-    # Casual speech: sentence-final periods -> tilde (keep ? ! and decimals)
     stripped = re.sub(r'(?<![0-9])\.(?=\s|$)', '~', stripped)
     stripped = re.sub(r'~{2,}', '~', stripped)
-    stripped = re.sub(r'\s+', ' ', stripped).strip()
-    return stripped
-
-
-def strip_elevenlabs_tags(text: str) -> str:
-    """Remove ElevenLabs audio tags from text shown to the user."""
-    if not text:
-        return text
-    cleaned = ELEVENLABS_AUDIO_TAGS.sub(' ', text)
-    return re.sub(r'\s+', ' ', cleaned).strip()
+    return re.sub(r'\s+', ' ', stripped).strip()
 
 
 _HOUR_KO = (None, '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두')

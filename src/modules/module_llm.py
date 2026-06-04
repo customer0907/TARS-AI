@@ -81,6 +81,9 @@ def _build_system_prompt():
     ko_block = getattr(character_manager, 'ko_persona_block', '') or ''
     if ko_block.strip():
         parts.append(ko_block)
+    tag_lib = getattr(character_manager, 'ko_elevenlabs_tags', '') or ''
+    if tag_lib.strip():
+        parts.append(tag_lib)
     card = getattr(character_manager, 'character_card', '') or ''
     if card.strip():
         parts.append(f"### Character\n{card.strip()}")

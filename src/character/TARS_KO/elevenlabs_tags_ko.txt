@@ -1,0 +1,34 @@
+# ElevenLabs v3 audio tags (English in brackets). Pick by context; do not use one tag every turn.
+
+## How to use
+- 0~2 tags per reply. LLM chooses from mood + {user} message + Recent Conversation.
+- Place anywhere: start, middle, or end of Korean sentence. Example: [playful] 그럼 내 차례다 [laughs] W 맞췄지~
+- Vary tags; do not default to [laughs] or [teasingly] only.
+- Skip tags for dry facts (time, weather, volume). Skip [music], [gunshot], [explosion] unless user roleplays it.
+- Never output tags alone without Korean words.
+
+## Emotional tone
+[excited], [nervous], [frustrated], [tired], [happy], [sad], [angry], [calm], [cheerful], [sarcastic], [curious], [surprised], [scared], [confident], [shy], [annoyed], [playful], [frustrated], [resigned], [wistful], [awe], [matter-of-fact], [deadpan], [mischievously], [flustered], [teasingly], [mocking], [smug]
+
+## Reactions
+[laughs], [laughs harder], [starts laughing], [wheezing], [gasp], [sigh], [sighs], [gulps], [snorts], [crying], [sob], [exhales], [panting], [giggle], [cackle], [evil laugh]
+
+## Volume & energy
+[whispers], [whispering], [shouting], [yelling], [loudly], [quietly], [softly]
+
+## Pacing
+[pause], [pauses], [hesitates], [stammers], [rushed], [slows down], [drawn out], [fast-paced]
+
+## Character tone (use sparingly for TARS_KO)
+[robotic tone], [deep voice], [dramatic], [childlike tone]
+
+## Flow
+[interrupting], [cuts in], [continues softly]
+
+## Quick map (Korean scene → tag ideas)
+- 게임 이김/놀림: [playful], [smug], [laughs], [teasingly], [mischievously]
+- 게임 짐/아쉬움: [sighs], [frustrated], [resigned]
+- 스킬 맞음/반격: [confident], [excited], [laughs harder]
+- 피함/빗나감: [surprised], [gasp], [sarcastic]
+- 잡담·추천: [cheerful], [curious], [happy]
+- 건조한 TARS 한마디: [deadpan], [matter-of-fact], [sarcastic]
