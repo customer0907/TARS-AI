@@ -74,10 +74,15 @@ def _build_system_prompt():
         return None
     char_name = character_manager.char_name if character_manager else ''
     user_name = CONFIG['CHAR'].get('user_name', '')
-    parts = [
-        CONFIG['LLM'].get('systemprompt', ''),
-        CONFIG['LLM'].get('instructionprompt', ''),
-    ]
+    parts = []
+    ko_block = getattr(character_manager, 'ko_persona_block', '') or ''
+    if ko_block.strip():
+        parts.append(ko_block)
+    card = getattr(character_manager, 'character_card', '') or ''
+    if card.strip():
+        parts.append(f"### Character\n{card.strip()}")
+    parts.append(CONFIG['LLM'].get('systemprompt', ''))
+    parts.append(CONFIG['LLM'].get('instructionprompt', ''))
     text = "\n".join(p for p in parts if p and p.strip())
     text = text.replace('{char}', char_name).replace('{user}', user_name).strip()
     return text or None

@@ -32,21 +32,18 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
     language = config['CHAR'].get('language', 'en')
     user_details = config['CHAR'].get('user_details', '')
 
-    # ko mode: config.ini prompts + persona.ini traits (+ mes_example when set).
+    # ko: persona lives in API system role (persona_ko.txt + config). User turn = context only.
     if language == 'ko':
         persona_traits = "\n".join(
             [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
         )
         base_prompt = (
-            f"System: {config['LLM']['systemprompt']}\n\n"
-            f"### Instruction:\n"
-            f"{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
             f"### Interaction Context:\n---\n"
             f"User: {user_name}\n"
             f"Character: {char_name}\n"
             f"{user_details}\n"
             f"{dtg}\n---\n\n"
-            f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
+            f"### {char_name} Settings (sliders):\n{persona_traits}\n---\n\n"
         )
     else:
         persona_traits = "\n".join(
