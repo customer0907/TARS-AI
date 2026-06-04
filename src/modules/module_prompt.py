@@ -16,7 +16,8 @@ _KO_TAG_ROTATION = (
 )
 
 
-def _ko_variety_hint(memory_manager) -> str:
+
+def _ko_variety_hint(memory_manager, user_prompt: str = "") -> str:
     """Nudge LLM away from anchoring on the previous reply's tags and catchphrases."""
     if not memory_manager or not getattr(memory_manager, "session_turns", None):
         return ""
@@ -24,6 +25,7 @@ def _ko_variety_hint(memory_manager) -> str:
         return ""
 
     last_bot = memory_manager.session_turns[-1][1] or ""
+
     last_tags = [t.lower() for t in re.findall(r"\[([^\]]+)\]", last_bot)]
     lines = ["### This-turn variety (mandatory):"]
 
@@ -70,7 +72,7 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
         persona_traits = "\n".join(
             [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
         )
-        variety = _ko_variety_hint(memory_manager)
+        variety = _ko_variety_hint(memory_manager, user_prompt)
         base_prompt = (
             f"### Interaction Context:\n---\n"
             f"User: {user_name}\n"
