@@ -40,6 +40,12 @@ class TTSConfig:
     elevenlabs_api_key: Optional[str] = None
     voice_id: Optional[str] = None
     model_id: Optional[str] = None
+
+    # Fish Audio specific settings
+    fishaudio_api_key: Optional[str] = None
+    fishaudio_reference_id: Optional[str] = None
+    fishaudio_model: Optional[str] = None
+    fishaudio_format: Optional[str] = None
     
     # Server specific settings
     ttsurl: Optional[str] = None
@@ -57,6 +63,13 @@ class TTSConfig:
         elif self.ttsoption == "elevenlabs":
             if not self.elevenlabs_api_key:
                 queue_message("ERROR: ElevenLabs API key is required for ElevenLabs TTS")
+                return False
+        elif self.ttsoption == "fishaudio":
+            if not self.fishaudio_api_key:
+                queue_message("ERROR: Fish Audio API key is required for Fish Audio TTS")
+                return False
+            if not self.fishaudio_reference_id:
+                queue_message("ERROR: Fish Audio reference_id is required for Fish Audio TTS")
                 return False
         elif self.ttsoption in ["xttsv2", "alltalk"]:
             if not self.ttsurl:
@@ -80,6 +93,10 @@ class TTSConfig:
             elevenlabs_api_key=config_dict.get('elevenlabs_api_key'),
             voice_id=config_dict.get('voice_id'),
             model_id=config_dict.get('model_id'),
+            fishaudio_api_key=config_dict.get('fishaudio_api_key'),
+            fishaudio_reference_id=config_dict.get('fishaudio_reference_id'),
+            fishaudio_model=config_dict.get('fishaudio_model'),
+            fishaudio_format=config_dict.get('fishaudio_format'),
             ttsurl=config_dict.get('ttsurl')
         )
 
@@ -220,12 +237,16 @@ def load_config():
             "ttsoption": _lang_get('TTS', 'ttsoption'),
             "azure_api_key": os.getenv('AZURE_API_KEY'),
             "elevenlabs_api_key": os.getenv('ELEVENLABS_API_KEY'),
+            "fishaudio_api_key": os.getenv('FISH_AUDIO_API_KEY'),
             "azure_region": config['TTS']['azure_region'],
             "ttsurl": config['TTS']['ttsurl'],
             "toggle_charvoice": config.getboolean('TTS', 'toggle_charvoice'),
             "tts_voice": _lang_get('TTS', 'tts_voice'),
             "voice_id": config['TTS']['voice_id'],
             "model_id": config['TTS']['model_id'],
+            "fishaudio_reference_id": config.get('TTS', 'fishaudio_reference_id', fallback=''),
+            "fishaudio_model": config.get('TTS', 'fishaudio_model', fallback='s2.1-pro-free'),
+            "fishaudio_format": config.get('TTS', 'fishaudio_format', fallback='mp3'),
             "voice_only": config.getboolean('TTS', 'voice_only'),
             "is_talking_override": config.getboolean('TTS', 'is_talking_override'),
             "is_talking": config.getboolean('TTS', 'is_talking'),
@@ -244,6 +265,15 @@ def load_config():
             "url": config['HOME_ASSISTANT']['url'],
             "ha_skip_llm": config.get('HOME_ASSISTANT', 'ha_skip_llm', fallback='true'),
             "HA_TOKEN": os.getenv('HA_TOKEN'),
+        },
+        "MQTT": {  
+            "enabled": config.get('MQTT', 'enabled', fallback='False'),
+            "host": config.get('MQTT', 'host', fallback='192.168.219.164'),
+            "port": config.get('MQTT', 'port', fallback='1883'),
+            "username": config.get('MQTT', 'username', fallback=''),
+            "password": config.get('MQTT', 'password', fallback=''),
+            "topic_voice": config.get('MQTT', 'topic_voice', fallback='tars/voice/alert'),
+            "client_id": config.get('MQTT', 'client_id', fallback='tars_robot'),
         },
         "VOLUME": {
             # amixer simple-control name. USB DACs often expose 'PCM' instead of 'Master'.

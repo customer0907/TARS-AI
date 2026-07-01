@@ -142,7 +142,7 @@ ttsoption = piper
 ttsoption_ko = melotts_ko
 # Onboard Options: espeak, piper, silero, melotts_ko (Korean)
 # External SelfHosted: alltalk
-# Externally Hosted: azure, elevenlabs
+# Externally Hosted: azure, elevenlabs, fishaudio
 # In ko mode (language = ko) this uses ttsoption_ko automatically.
 azure_region = eastus
 # Azure region for Azure TTS (e.g., eastus)
@@ -158,6 +158,12 @@ voice_id = JBFqnCBsd6RMkjVDRZzb
 # Voice ID of ElevenLabs (e.g.,JBFqnCBsd6RMkjVDRZzb)
 model_id = eleven_multilingual_v2
 # Model ID of ElevenLabs (e.g.,eleven_multilingual_v2)
+fishaudio_reference_id =
+# Reference ID of Fish Audio voice.
+fishaudio_model = s2.1-pro-free
+# Model header value for Fish Audio TTS.
+fishaudio_format = mp3
+# Output format for Fish Audio TTS.
 voice_only = False
 # If True, only generate voice responses (no text)
 is_talking_override = False
@@ -216,6 +222,16 @@ ha_skip_llm = true
 # If set to False, the Stable Diffusion module will be disabled.
 url = http://192.168.2.5:8123
 # Url to acccess HA from (set Token in .env file!).
+
+[MQTT]
+enabled = False
+# HA Mosquitto broker (same host as HA unless you run a local broker on the Pi).
+host = 192.168.219.164
+port = 1883
+username =
+password =
+topic_voice = tars/voice/alert
+client_id = tars_robot
 
 [VOLUME] # amixer volume control (NB "Volume" tool -> module_volume.py)
 control = Master

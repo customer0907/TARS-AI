@@ -49,6 +49,8 @@ selenium                # Web automation for browser control
 discord.py              # Discord bot API
 discord.py[voice]       # Voice chat functionality for Discord bots
 requests                # HTTP library for API interactions
+httpx                   # Async HTTP client for Fish Audio TTS
+paho-mqtt               # MQTT alerts from Home Assistant
 pandas                  # Data analysis and manipulation
 joblib                  # Efficient serialization of Python objects
 adafruit-pca9685

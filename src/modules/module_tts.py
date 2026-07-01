@@ -28,6 +28,11 @@ from modules.module_espeak import text_to_speech_with_pipelining_espeak
 from modules.module_alltalk import text_to_speech_with_pipelining_alltalk
 from modules.module_elevenlabs import text_to_speech_with_pipelining_elevenlabs
 from modules.module_azure import text_to_speech_with_pipelining_azure
+# Fish Audio is optional, so absent httpx does not break other TTS engines.
+try:
+    from modules.module_fishaudio import text_to_speech_with_pipelining_fishaudio
+except Exception:
+    text_to_speech_with_pipelining_fishaudio = None
 # Korean MeloTTS is optional — imported lazily so absent installs don't break other engines.
 try:
     from modules.module_melotts import text_to_speech_with_pipelining_melotts
@@ -248,6 +253,15 @@ async def generate_tts_audio(text, config, azure_api_key=None, azure_region=None
 
         elif ttsoption == "elevenlabs":
             async for chunk in text_to_speech_with_pipelining_elevenlabs(text):
+                yield chunk
+
+        elif ttsoption == "fishaudio":
+            if text_to_speech_with_pipelining_fishaudio is None:
+                raise RuntimeError(
+                    "fishaudio selected but httpx is not installed. "
+                    "Run: pip install httpx"
+                )
+            async for chunk in text_to_speech_with_pipelining_fishaudio(text):
                 yield chunk
 
         elif ttsoption == "silero":

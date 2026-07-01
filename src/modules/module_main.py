@@ -36,6 +36,13 @@ CONFIG = load_config()
 stop_event = threading.Event()
 executor = concurrent.futures.ProcessPoolExecutor(max_workers=4)
 
+
+def strip_speaker_prefix(text):
+    """Remove leading display speaker labels before sending text to TTS."""
+    if not text:
+        return text
+    return re.sub(r'^\s*(?:TARS|타스)\s*:\s*', '', text, flags=re.IGNORECASE).strip()
+
 # === Threads ===
 def start_bt_controller_thread():
     """
@@ -154,12 +161,13 @@ def utterance_callback(message):
         if thoughts:
             pass
 
-        queue_message(f"TARS: {strip_elevenlabs_tags(reply)}")
+        reply_for_voice = strip_speaker_prefix(reply)
+        queue_message(f"TARS: {strip_elevenlabs_tags(reply_for_voice)}")
 
-        tts_text = reply
+        tts_text = reply_for_voice
         if CONFIG['CHAR'].get('language') == 'ko':
             tts_text = normalize_for_korean_tts(tts_text)
-        if CONFIG['TTS']['ttsoption'] != 'elevenlabs':
+        if CONFIG['TTS']['ttsoption'] not in ('elevenlabs', 'fishaudio'):
             tts_text = re.sub(
                 r'[^\w\s.,?!;:"\'\-。、，·…]', '', tts_text, flags=re.UNICODE
             )

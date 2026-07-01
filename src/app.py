@@ -35,6 +35,7 @@ from modules.module_llm import initialize_manager_llm
 import modules.module_chatui
 from modules.module_messageQue import queue_message
 from modules.module_diag_log import init_diag_log, get_diag_log_path
+from modules.module_mqtt_listener import set_stt_manager, start_mqtt_listener
 
 # === Constants and Globals ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,6 +90,17 @@ if __name__ == "__main__":
     # Pass managers to main module
     initialize_managers(memory_manager, char_manager, stt_manager)
     initialize_manager_llm(memory_manager, char_manager)
+    set_stt_manager(stt_manager)
+
+    mqtt_thread = None
+    if CONFIG['MQTT']['enabled'] == 'True':
+        mqtt_thread = threading.Thread(
+            target=start_mqtt_listener,
+            args=(shutdown_event,),
+            name="MQTTListenerThread",
+            daemon=True,
+        )
+        mqtt_thread.start()
 
     # Start necessary threads
     if CONFIG['CONTROLS']['enabled'] == 'True':
