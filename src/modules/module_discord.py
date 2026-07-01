@@ -106,19 +106,18 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # Respond to mentions
-    if message.content.startswith(f"<@{client.user.id}>"):
-        user_message = message.content.strip()
+    # Respond when the bot is @mentioned (<@id> or <@!id> formats)
+    if client.user not in message.mentions:
+        return
 
-       
-        queue_message(f"DISCORD: {await replace_mentions_with_usernames(user_message)}")
+    user_message = message.content.strip()
+    queue_message(f"DISCORD: {await replace_mentions_with_usernames(user_message)}")
 
-        # Use the callback to process the message
-        if process_discord_message_callback:
-            reply = process_discord_message_callback(user_message)
-            queue_message(f"DISCORD: {await replace_mentions_with_usernames(message.author.mention)} {reply}")
-
-            await message.channel.send(f"{message.author.mention} {reply}")
-        else:
-            queue_message("No callback function defined.")
-            await message.channel.send("Error: No processing logic available.")
+    # Use the callback to process the message
+    if process_discord_message_callback:
+        reply = process_discord_message_callback(user_message)
+        queue_message(f"DISCORD: {await replace_mentions_with_usernames(message.author.mention)} {reply}")
+        await message.channel.send(f"{message.author.mention} {reply}")
+    else:
+        queue_message("No callback function defined.")
+        await message.channel.send("Error: No processing logic available.")

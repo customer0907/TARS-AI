@@ -70,7 +70,7 @@ def process_discord_message_callback(user_message):
         # Parse the user message
         #queue_message(user_message)
 
-        match = re.match(r"<@(\d+)> ?(.*)", user_message)
+        match = re.match(r"<@!?(\d+)> ?(.*)", user_message)
 
         if match:
             mentioned_user_id = match.group(1)  # Extracted user ID
