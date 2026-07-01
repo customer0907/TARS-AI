@@ -8,11 +8,13 @@ It allows the bot to respond to messages and mentions in a specified Discord cha
 """
 
 # === Standard Libraries ===
+import asyncio
 import discord
 
 # === Custom Modules ===
 from modules.module_config import load_config
 from modules.module_messageQue import queue_message
+from modules.module_diag_log import diag_log
 
 # === Constants and Globals ===
 CONFIG = load_config()
@@ -92,6 +94,12 @@ async def on_ready():
     queue_message(f"INFO: Logged in as {client.user}")
 
 
+def _bot_is_mentioned(message):
+    if not client.user:
+        return False
+    return any(mention.id == client.user.id for mention in message.mentions)
+
+
 @client.event
 async def on_message(message):
     """
@@ -99,25 +107,35 @@ async def on_message(message):
     """
     global process_discord_message_callback
 
-    if message.author == client.user:
-        return  # Prevent the bot from replying to itself
-    
-    # Ignore messages from the bot itself
-    if message.author == client.user:
+    if message.author.bot:
         return
 
-    # Respond when the bot is @mentioned (<@id> or <@!id> formats)
-    if client.user not in message.mentions:
+    diag_log(
+        f"discord rx ch={message.channel.id} author={message.author} "
+        f"mentions={[m.id for m in message.mentions]} content={message.content[:120]!r}"
+    )
+
+    if not _bot_is_mentioned(message):
         return
 
     user_message = message.content.strip()
-    queue_message(f"DISCORD: {await replace_mentions_with_usernames(user_message)}")
+    queue_message(f"DISCORD: recv {message.author.name}: {user_message[:120]}")
 
-    # Use the callback to process the message
-    if process_discord_message_callback:
-        reply = process_discord_message_callback(user_message)
-        queue_message(f"DISCORD: {await replace_mentions_with_usernames(message.author.mention)} {reply}")
-        await message.channel.send(f"{message.author.mention} {reply}")
-    else:
-        queue_message("No callback function defined.")
+    if not process_discord_message_callback:
+        queue_message("ERROR: Discord callback not defined.")
         await message.channel.send("Error: No processing logic available.")
+        return
+
+    bot_id = client.user.id
+    try:
+        loop = asyncio.get_running_loop()
+        reply = await loop.run_in_executor(
+            None,
+            lambda: process_discord_message_callback(user_message, bot_id),
+        )
+        queue_message(f"DISCORD: reply -> {message.author.name}: {reply[:120]}")
+        await message.channel.send(f"{message.author.mention} {reply}")
+    except Exception as e:
+        queue_message(f"ERROR: Discord reply failed: {e}")
+        diag_log(f"discord reply error: {e}")
+        await message.channel.send(f"{message.author.mention} (응답 생성 중 오류가 났어.)")

@@ -56,37 +56,31 @@ def start_bt_controller_thread():
         queue_message(f"ERROR: {e}")
 
 # === Callback Functions ===
-def process_discord_message_callback(user_message):
+def process_discord_message_callback(user_message, bot_user_id=None):
     """
     Processes the user's message and generates a response.
 
     Parameters:
     - user_message (str): The message content sent by the user.
+    - bot_user_id (int): Discord bot user ID for stripping the @mention prefix.
 
     Returns:
     - str: The bot's response.
     """
+    reply = "뭐?"
     try:
-        # Parse the user message
-        #queue_message(user_message)
+        if bot_user_id:
+            message_content = re.sub(rf"<@!?{bot_user_id}>\s*", "", user_message).strip()
+        else:
+            match = re.match(r"<@!?(\d+)> ?(.*)", user_message)
+            message_content = match.group(2).strip() if match else user_message.strip()
 
-        match = re.match(r"<@!?(\d+)> ?(.*)", user_message)
+        if not message_content:
+            return "응?"
 
-        if match:
-            mentioned_user_id = match.group(1)  # Extracted user ID
-            message_content = match.group(2).strip()  # Extracted message content (trim leading/trailing spaces)
-
-        #stream_text_nonblocking(f"{mentioned_user_id}: {message_content}")
-        #queue_message(message_content)
-
-        # Process the message using process_completion
-        reply = process_completion(message_content)  # Process the message
-
-        #queue_message(f"TARS: {reply}")
-        #stream_text_nonblocking(f"TARS: {reply}")
-        
+        reply = process_completion(message_content)
     except Exception as e:
-        queue_message(f"ERROR: {e}")
+        queue_message(f"ERROR: Discord callback: {e}")
 
     return reply
 
