@@ -291,6 +291,7 @@ def load_config():
         "DISCORD": {
             "TOKEN": os.getenv('DISCORD_TOKEN'),
             "channel_id": config['DISCORD']['channel_id'],
+            "require_mention": config.get('DISCORD', 'require_mention', fallback='True'),
             "enabled": config['DISCORD']['enabled'],
         },
         "SERVO": {

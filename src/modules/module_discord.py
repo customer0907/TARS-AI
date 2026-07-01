@@ -89,15 +89,38 @@ async def mention_to_username(mention):
 
     return None  # If the mention format or user is invalid
 
-@client.event
-async def on_ready():
-    queue_message(f"INFO: Logged in as {client.user}")
-
 
 def _bot_is_mentioned(message):
     if not client.user:
         return False
     return any(mention.id == client.user.id for mention in message.mentions)
+
+
+def _require_mention():
+    return str(CONFIG['DISCORD'].get('require_mention', 'True')).lower() not in ('false', '0', 'no')
+
+
+def _is_dedicated_channel(message):
+    channel_id = str(CONFIG['DISCORD'].get('channel_id', '')).strip()
+    if not channel_id or channel_id == '0':
+        return False
+    return str(message.channel.id) == channel_id
+
+
+def _should_respond(message):
+    if _is_dedicated_channel(message) and not _require_mention():
+        return True
+    return _bot_is_mentioned(message)
+
+
+@client.event
+async def on_ready():
+    queue_message(f"INFO: Logged in as {client.user}")
+    channel_id = str(CONFIG['DISCORD'].get('channel_id', '')).strip()
+    if channel_id and channel_id != '0' and not _require_mention():
+        queue_message(
+            f"INFO: Discord dedicated channel {channel_id} — no @mention required"
+        )
 
 
 @client.event
@@ -115,7 +138,7 @@ async def on_message(message):
         f"mentions={[m.id for m in message.mentions]} content={message.content[:120]!r}"
     )
 
-    if not _bot_is_mentioned(message):
+    if not _should_respond(message):
         return
 
     user_message = message.content.strip()
