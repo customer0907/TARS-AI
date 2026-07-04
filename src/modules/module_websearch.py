@@ -69,9 +69,17 @@ def _naver_credentials():
     return client_id, client_secret
 
 
+def _brave_api_key():
+    return os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+
+
 def is_naver_search_available():
     client_id, client_secret = _naver_credentials()
     return bool(client_id and client_secret)
+
+
+def is_brave_search_available():
+    return bool(_brave_api_key())
 
 # === Helper Functions ===
 # Silence logs to suppress unnecessary outputs
@@ -206,6 +214,69 @@ def _naver_search_once(query, category, display):
     return items
 
 
+def _normalize_naver_item(item, category):
+    title = _strip_html(item.get("title"))
+    snippet = _strip_html(
+        item.get("description")
+        or item.get("link")
+        or item.get("mallName")
+        or item.get("address")
+    )
+    url = item.get("link") or item.get("originallink") or ""
+    if category == "shopping":
+        price = item.get("lprice") or item.get("hprice")
+        mall = _strip_html(item.get("mallName"))
+        extras = []
+        if price:
+            extras.append(f"price={price} KRW")
+        if mall:
+            extras.append(f"mall={mall}")
+        if extras:
+            snippet = f"{snippet} [{' ; '.join(extras)}]".strip()
+    return {
+        "provider": "naver",
+        "category": category,
+        "title": title,
+        "snippet": snippet,
+        "url": url,
+    }
+
+
+def search_brave_items(query, display=5):
+    api_key = _brave_api_key()
+    if not api_key:
+        raise RuntimeError("Brave Search API key is missing.")
+
+    url = "https://api.search.brave.com/res/v1/web/search"
+    headers = {
+        "Accept": "application/json",
+        "X-Subscription-Token": api_key,
+    }
+    params = {
+        "q": query,
+        "count": max(1, min(int(display), 10)),
+        "country": "KR",
+        "search_lang": "ko",
+        "safesearch": "moderate",
+    }
+
+    queue_message(f"INFO: Searching Brave web for: {query}")
+    response = requests.get(url, headers=headers, params=params, timeout=8)
+    response.raise_for_status()
+    raw_items = response.json().get("web", {}).get("results", [])
+    queue_message(f"INFO: Brave web returned {len(raw_items)} results")
+    return [
+        {
+            "provider": "brave",
+            "category": "web",
+            "title": _strip_html(item.get("title")),
+            "snippet": _strip_html(item.get("description")),
+            "url": item.get("url") or "",
+        }
+        for item in raw_items[:display]
+    ]
+
+
 def _naver_fallback_categories(category):
     if category == "news":
         return ["news", "web", "blog"]
@@ -226,6 +297,14 @@ def _extract_json_object(text):
         return json.loads(match.group(0))
     except json.JSONDecodeError:
         return None
+
+
+def _load_raw_complete_llm():
+    try:
+        from modules.module_llm import raw_complete_llm
+    except Exception:
+        from module_llm import raw_complete_llm
+    return raw_complete_llm
 
 
 def _normalize_naver_category(category):
@@ -262,7 +341,7 @@ def plan_search_query(user_query, category_hint="auto"):
     }
 
     try:
-        from modules.module_llm import raw_complete_llm
+        raw_complete_llm = _load_raw_complete_llm()
     except Exception as e:
         queue_message(f"WARNING: Search planner unavailable: {e}")
         return fallback
@@ -310,6 +389,177 @@ JSON:
         "query": planned_query,
         "category": planned_category,
     }
+
+
+def _format_search_items(items, limit=8):
+    lines = []
+    for index, item in enumerate(items[:limit], 1):
+        line = (
+            f"{index}. [{item.get('provider')}/{item.get('category')}] "
+            f"{item.get('title')}"
+        )
+        if item.get("snippet"):
+            line += f" - {item.get('snippet')}"
+        if item.get("url"):
+            line += f" ({item.get('url')})"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _extract_answer_from_results(user_query, plan, items):
+    if not items:
+        return {
+            "answer_found": False,
+            "answer": "",
+            "confidence": "low",
+            "evidence": [],
+            "followup_context": {},
+        }
+
+    try:
+        raw_complete_llm = _load_raw_complete_llm()
+    except Exception as e:
+        queue_message(f"WARNING: Answer extractor unavailable: {e}")
+        return {
+            "answer_found": True,
+            "answer": "",
+            "confidence": "low",
+            "evidence": [],
+            "followup_context": {},
+        }
+
+    result_text = _format_search_items(items, limit=8)
+    prompt = f"""
+You are an evidence-bound answer extractor for a Korean voice assistant.
+Return ONLY one JSON object with:
+{{
+  "answer_found": true|false,
+  "answer": "direct answer in Korean",
+  "confidence": "high|medium|low",
+  "evidence": ["short copied-or-paraphrased evidence 1", "evidence 2"],
+  "followup_context": {{}}
+}}
+
+Rules:
+- Use ONLY the search results below. Do not use memory or guess.
+- If the results do not directly answer the user's question, set answer_found false.
+- If sources disagree, say so in answer and set confidence medium or low.
+- For sports results include winner, loser, and score when present.
+- For product price questions include model name, price, and source/mall when present.
+- Keep answer concise and factual. No persona, no jokes, no advice to sleep.
+
+User question: {user_query}
+Planned search: query="{plan.get('query')}", category="{plan.get('category')}"
+
+Search results:
+{result_text}
+
+JSON:
+""".strip()
+
+    extracted_text = raw_complete_llm(prompt)
+    extracted = _extract_json_object(extracted_text)
+    if not isinstance(extracted, dict):
+        queue_message("WARNING: Answer extractor returned invalid JSON.")
+        return {
+            "answer_found": False,
+            "answer": "",
+            "confidence": "low",
+            "evidence": [],
+            "followup_context": {},
+        }
+    return extracted
+
+
+def _format_search_tool_result(user_query, plan, items, extracted):
+    return (
+        "SEARCH_TOOL_RESULT\n"
+        f"Original question: {user_query}\n"
+        f"Planned query: {plan.get('query')}\n"
+        f"Planned category: {plan.get('category')}\n"
+        f"Answer JSON: {json.dumps(extracted, ensure_ascii=False)}\n"
+        "Search results:\n"
+        f"{_format_search_items(items, limit=8)}\n"
+        "Assistant rule: answer using Answer JSON only. If answer_found is false, say the search results did not clearly answer it. Do not invent missing facts."
+    )
+
+
+def search_combined(query, category="auto", display=5):
+    plan = plan_search_query(query, category)
+    if not plan.get("should_search", True):
+        return "Search planner decided no external search is needed."
+
+    planned_query = plan.get("query") or query
+    resolved_category = _normalize_naver_category(plan.get("category")) or _naver_category_for_query(query, category)
+    items = []
+    tried = []
+
+    if is_naver_search_available():
+        for candidate in _naver_fallback_categories(resolved_category):
+            tried.append(f"naver:{candidate}:{planned_query}")
+            try:
+                naver_items = _naver_search_once(planned_query, candidate, display)
+            except Exception as e:
+                queue_message(f"WARNING: Naver {candidate} search failed: {e}")
+                naver_items = []
+            items.extend(_normalize_naver_item(item, candidate) for item in naver_items)
+            if items and candidate == resolved_category:
+                break
+    else:
+        queue_message("INFO: Naver credentials missing; skipping Naver search.")
+
+    if is_brave_search_available():
+        tried.append(f"brave:web:{planned_query}")
+        try:
+            items.extend(search_brave_items(planned_query, display=display))
+        except Exception as e:
+            queue_message(f"WARNING: Brave search failed: {e}")
+    else:
+        queue_message("INFO: Brave Search API key missing; skipping Brave search.")
+
+    if not items and planned_query != query:
+        if is_naver_search_available():
+            fallback_category = _naver_category_for_query(query, category)
+            for candidate in _naver_fallback_categories(fallback_category):
+                tried.append(f"naver:{candidate}:{query}")
+                try:
+                    naver_items = _naver_search_once(query, candidate, display)
+                except Exception as e:
+                    queue_message(f"WARNING: Naver fallback {candidate} search failed: {e}")
+                    naver_items = []
+                items.extend(_normalize_naver_item(item, candidate) for item in naver_items)
+                if items:
+                    break
+        if is_brave_search_available():
+            tried.append(f"brave:web:{query}")
+            try:
+                items.extend(search_brave_items(query, display=display))
+            except Exception as e:
+                queue_message(f"WARNING: Brave fallback search failed: {e}")
+
+    # Keep prompt size bounded and remove exact duplicate URLs/titles.
+    deduped = []
+    seen = set()
+    for item in items:
+        key = (item.get("url") or item.get("title") or "").strip().lower()
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= 10:
+            break
+
+    extracted = _extract_answer_from_results(query, plan, deduped)
+    if not deduped:
+        extracted = {
+            "answer_found": False,
+            "answer": "",
+            "confidence": "low",
+            "evidence": [f"No results. Tried: {', '.join(tried)}"],
+            "followup_context": {},
+        }
+    return _format_search_tool_result(query, plan, deduped, extracted)
 
 
 def search_naver(query, category="auto", display=5):
@@ -376,18 +626,18 @@ def search_naver(query, category="auto", display=5):
 
 
 def search_web(query):
-    """Single WebSearch tool entrypoint: prefer Naver API, fallback to Google scraping."""
-    if is_naver_search_available():
-        return search_naver(query, category="auto")
-    queue_message("INFO: Naver credentials missing; falling back to Google search.")
+    """Single WebSearch tool entrypoint with planning, multi-provider search, and extraction."""
+    if is_naver_search_available() or is_brave_search_available():
+        return search_combined(query, category="auto")
+    queue_message("INFO: Search API credentials missing; falling back to Google search.")
     return search_google(query)
 
 
 def search_news(query):
-    """News tool entrypoint: prefer Naver News API, fallback to Google News scraping."""
-    if is_naver_search_available():
-        return search_naver(query, category="news")
-    queue_message("INFO: Naver credentials missing; falling back to Google News search.")
+    """News tool entrypoint with planning, multi-provider search, and extraction."""
+    if is_naver_search_available() or is_brave_search_available():
+        return search_combined(query, category="news")
+    queue_message("INFO: Search API credentials missing; falling back to Google News search.")
     return search_google_news(query)
 
 # === Search Functions ===

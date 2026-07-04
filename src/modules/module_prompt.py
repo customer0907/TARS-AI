@@ -185,10 +185,24 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
                 f"{character_manager.example_dialogue}\n---\n"
             )
 
+    tool_answer_rule = ""
+    if isinstance(functioncall, str) and functioncall.startswith("SEARCH_TOOL_RESULT"):
+        tool_answer_rule = (
+            "### Search Answer Rule:\n"
+            "- The Function Calling Tool contains Answer JSON extracted from search results.\n"
+            "- Use that Answer JSON as the factual source of truth.\n"
+            "- Do not contradict it, invent missing scores/prices/dates, or reuse earlier wrong answers.\n"
+            "- If answer_found is true, answer the user's factual question first and preserve the extracted facts exactly.\n"
+            "- If answer_found is false, say the search results did not clearly answer it instead of guessing.\n"
+            "- Keep the final reply conversational, but do not add unrelated advice such as telling the user to sleep.\n"
+            "---\n"
+        )
+
     # Append memory and examples to the prompt
     return (
         f"{base_prompt}"
         f"{example_dialog}"
+        f"{tool_answer_rule}"
         f"### Memory:\n---\nLong-Term Context:\n{past_memory}\n---\n"
         f"Recent Conversation:\n{short_term_memory}\n---\n"
         f"### Interaction:\n{config['CHAR']['user_name']}: {user_prompt}\n\n"
