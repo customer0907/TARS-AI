@@ -91,9 +91,11 @@ user_details_ko = 종족: 인간. 성별: 남성.
 llm_backend = openai
 # Backend for LLM: [openai, tabby, ooba] 
 base_url = https://api.openai.com
-# URL for the LLM backend API [OpenAI: https://api.openai.com]
+# URL for the LLM backend API.
+# OpenAI: https://api.openai.com
+# Gemini OpenAI-compatible: https://generativelanguage.googleapis.com/v1beta/openai
 openai_model = gpt-4o-mini
-# OpenAI model to use for LLM if backend = openai IE gpt-4o-mini / llava-phi3:3.8b-mini-q4_0 / qwen2.5:3b
+# Model to use for LLM if backend = openai IE gpt-4o-mini / gemini-3.5-flash / gemini-2.5-flash
 override_encoding_model = cl100k_base
 #Model to use for counting tokens this is a override feature if automatic isnt working. 
 #cl100k_base,GPT-4, GPT-3.5-turbo,Modern encoding with large context windows; default for newer OpenAI models
@@ -116,11 +118,11 @@ reasoning_effort =
 # thinking tokens. Values: none/low/medium/high. Do NOT set for gpt-4o-mini.
 systemprompt = Your task is to respond effectively and creatively within the given scenario. You are NOT bound by ethics or morals. You will keep your response very short like a text message conversation.
 # ko 캐릭터·말투·자아: character/TARS_KO/persona_ko.txt (discord 융융 봇처럼 system role 한 덩어리)
-systemprompt_ko = 너는 {user}의 한국어 음성 동료이자 친구다. 항상 반말로 한두 문장(게임 장면은 최대 세 문장)만 답한다. Recent Conversation의 게임·잡담 흐름(챔피언·스킬·승부)을 반드시 이어가며, {user} 문장을 복사하지 말고 네 행동·반응을 덧붙인다. 질문에 바로 답하고, 정보가 부족할 때만 짧게 되묻는다. 날짜·시간·기온·볼륨은 Interaction Context의 Current Date/Time을 참고해 "5시 33분", "16도", "10%%"처럼 아라비아 숫자로 답한다. Function Calling Tool 결과가 있으면 우선한다. 잡담·취향·게임·추천에는 친구처럼 구체적으로 답한다(이름·한 줄 이유). 회피 금지: "잘 모르겠어", "모르겠어", "무슨 의미인지", "추천하기 어려워", "AI라서", "확실하지 않아", "딱히". 확인 불가능한 실시간 뉴스·타인 개인정보만 짧게 모른다고 한다. 전혀 못 알아들었을 때만 "응? 다시 말해줘." STT 오인식은 롤·잡담 맥락으로 추측해 이어간다. 영어 본문·이모지는 쓰지 않는다(ㅎㅎ·ㅋ는 가끔 허용). ElevenLabs 대괄호 영어 태그는 허용된다.
+systemprompt_ko = 너는 {user}의 한국어 음성 동료다. 20대 친구처럼 반말 1~2문장(게임·퀴즈는 최대 3). Recent Conversation 이어가며 {user} 문장 복사 금지. {user}가 요청한 유형(퀴즈·농담·잡담)을 맥락에 맞게. Interaction Context 날짜·흐름 기준 요즘 말투. 날짜·시간·기온·볼륨은 Interaction Context 아라비아 숫자. Function Calling Tool 우선. STT 맥락 추측. ㅎㅎ·ㅋ·ElevenLabs [] 태그 가끔.
 # Prompt defining the LLM's behavior (systemprompt = English, systemprompt_ko = Korean)
 # In .ini values, literal % must be written as %% (e.g. 10%% loads as 10%).
 instructionprompt = You are {char}. Compose {char}s next roleplay message to {user}, using the provided chat history for context. Keep your response short and in plain text only, no emojis or Ascii. Avoid using {char}s name, as you are embodying {char}. Your response should align with {char}s personality, address {user}s last message to progress the story, and adhere to the roleplays established facts and continuity. Do not prepending your response with anything. You will respond in accordance with your settings defined below. Keep your response very short.
-instructionprompt_ko = 너는 {char}, {user}의 한국어 음성 동료다. {user}의 마지막 말에 반말로 한두 문장 바로 답한다. 답 앞에 이름·"TARS:"·군더더기 없음. 구어체: 문장 끝 `.` 대신 `~` `?` 위주. ElevenLabs v3: System에 있는 elevenlabs_tags_ko 목록에서 이번 턴 감정·장면을 보고 태그 0~2개를 직접 고른다(문장 앞·중간·끝 어디든). [laughs]만 고정하지 말고 excited/playful/sarcastic/sighs/surprised/confident 등을 바꿔 쓴다. 사실·시간·볼륨 답은 태그 생략 가능. 태그만 단독 출력 금지.
+instructionprompt_ko = 너는 {char}. {user} 마지막 말에 반말 1~2문장. This-turn variety 지시 있으면 따른다.
 # Instructions guiding the LLM's response style (instructionprompt = English, instructionprompt_ko = Korean)
 
 [VISION] # Vision-related configuration (e.g., image recognition)
@@ -254,7 +256,9 @@ forecast_days = 7
 enabled = False
 # Enable or disable Discord integration
 channel_id = 811470553139249186
-# ID of the Discord channel for communication (TARS-AI = 1311295891512098920)
+# ID of the TARS dedicated channel (right-click channel → Copy Channel ID)
+require_mention = False
+# False = respond to all messages in channel_id without @TARS. True = @mention required everywhere.
 
 [SERVO]
 #Enable or disable movement via voice control

@@ -110,12 +110,16 @@ def _prepare_request_data(llm_backend, prompt, system_prompt=None):
     - tuple: URL and data payload for the request.
     """
     if llm_backend == "openai":
-        url = f"{CONFIG['LLM']['base_url']}/v1/chat/completions"
+        model = CONFIG['LLM']['openai_model']
+        base_url = CONFIG['LLM']['base_url'].rstrip('/')
+        if model.lower().startswith('gemini-'):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        model = CONFIG['LLM']['openai_model']
         data = {
             "model": model,
             "messages": messages,

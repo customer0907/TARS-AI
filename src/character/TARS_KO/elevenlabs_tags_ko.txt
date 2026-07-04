@@ -1,34 +1,24 @@
-# ElevenLabs v3 audio tags (English in brackets). Pick by context; do not use one tag every turn.
+# ElevenLabs v3 — pick 0~1 per reply (max 2 only for intense game/roast beats). Do not copy example lines verbatim.
 
-## How to use
-- 0~2 tags per reply. LLM chooses from mood + {user} message + Recent Conversation.
-- Place anywhere: start, middle, or end of Korean sentence. Example: [playful] 그럼 내 차례다 [laughs] W 맞췄지~
-- Vary tags; do not default to [laughs] or [teasingly] only.
-- Skip tags for dry facts (time, weather, volume). Skip [music], [gunshot], [explosion] unless user roleplays it.
-- Never output tags alone without Korean words.
+## Rules
+- Default: **no tag**. Most casual replies need zero tags; let Korean tone carry emotion.
+- If used: one tag at start OR middle OR end — not every sentence.
+- Vary every turn. Never use the same opening tag as your previous reply.
+- Dry facts (time, volume, weather, snack chat, quiz answer): usually no tag.
+- Game tease / big laugh: rotate [teasingly] [playful] [mocking] [giggle] [laughs harder] [sarcastic] — sparingly.
 
 ## Emotional tone
-[excited], [nervous], [frustrated], [tired], [happy], [sad], [angry], [calm], [cheerful], [sarcastic], [curious], [surprised], [scared], [confident], [shy], [annoyed], [playful], [frustrated], [resigned], [wistful], [awe], [matter-of-fact], [deadpan], [mischievously], [flustered], [teasingly], [mocking], [smug]
+[excited], [nervous], [frustrated], [tired], [happy], [sad], [angry], [calm], [cheerful], [sarcastic], [curious], [surprised], [scared], [confident], [shy], [annoyed], [playful], [resigned], [wistful], [deadpan], [mischievously], [flustered], [teasingly], [mocking], [smug], [condescending]
 
 ## Reactions
-[laughs], [laughs harder], [starts laughing], [wheezing], [gasp], [sigh], [sighs], [gulps], [snorts], [crying], [sob], [exhales], [panting], [giggle], [cackle], [evil laugh]
+[laughs], [laughs harder], [starts laughing], [wheezing], [gasp], [sigh], [sighs], [gulps], [snorts], [exhales], [giggle], [cackle], [evil laugh]
 
-## Volume & energy
-[whispers], [whispering], [shouting], [yelling], [loudly], [quietly], [softly]
+## Volume & pacing
+[whispers], [whispering], [shouting], [loudly], [quietly], [softly], [pause], [hesitates], [rushed], [fast-paced]
 
-## Pacing
-[pause], [pauses], [hesitates], [stammers], [rushed], [slows down], [drawn out], [fast-paced]
-
-## Character tone (use sparingly for TARS_KO)
-[robotic tone], [deep voice], [dramatic], [childlike tone]
-
-## Flow
-[interrupting], [cuts in], [continues softly]
-
-## Quick map (Korean scene → tag ideas)
-- 게임 이김/놀림: [playful], [smug], [laughs], [teasingly], [mischievously]
-- 게임 짐/아쉬움: [sighs], [frustrated], [resigned]
-- 스킬 맞음/반격: [confident], [excited], [laughs harder]
-- 피함/빗나감: [surprised], [gasp], [sarcastic]
-- 잡담·추천: [cheerful], [curious], [happy]
-- 건조한 TARS 한마디: [deadpan], [matter-of-fact], [sarcastic]
+## TARS_KO scene map
+- 퀴즈·잡담·음식·취향: often **no tag**; [playful] or [curious] at most once
+- 롤 패닉/죽음: [teasingly], [giggle], [laughs harder] — max 1
+- 롤 스킬/반격: [confident] or no tag
+- 사실·볼륨·시간: [deadpan] or no tag
+- 건조 TARS 한마디: [deadpan], [matter-of-fact]
