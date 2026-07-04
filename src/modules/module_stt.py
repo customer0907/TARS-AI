@@ -1281,6 +1281,18 @@ class STTManager:
         """
         Measure the background noise level for 2-3 seconds and set the silence threshold.
         """
+        manual_db = str(self.config['STT'].get('silence_threshold_db', '') or '').strip()
+        if manual_db:
+            try:
+                db = float(manual_db)
+                self.silence_threshold = 10 ** (db / 20)
+                print(f"INFO: Silence threshold manually set to: {db:.2f} dB")
+                return
+            except ValueError:
+                print(
+                    f"WARNING: Invalid silence_threshold_db '{manual_db}', measuring background noise."
+                )
+
         silence_margin = 2.5  # Add a 250% margin to background noise level
         print(f"INFO: Measuring background noise...")
 

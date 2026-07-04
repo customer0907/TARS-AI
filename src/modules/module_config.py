@@ -184,6 +184,7 @@ def load_config():
             "vosk_model": _lang_get('STT', 'vosk_model'),
             "use_indicators": config.getboolean('STT', 'use_indicators'),
             "vad_method": config['STT']['vad_method'],
+            "silence_threshold_db": config.get('STT', 'silence_threshold_db', fallback=''),
             "speechdelay": int(config['STT']['speechdelay']),
             "wake_responses_file": _lang_get(
                 'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'

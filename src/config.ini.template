@@ -32,6 +32,9 @@ use_indicators = True
 # Use beeps to indicate when listening
 vad_method = rms
 # Enable silero or rms
+silence_threshold_db =
+# Optional manual RMS silence threshold in dB. Blank = auto-measure on startup.
+# Try 48-55 indoors if auto-measure is too high; higher = less sensitive.
 speechdelay = 20
 # Legacy; does NOT control the [SILENCE: #####] bar. See listen_silent_frames below.
 listen_silent_frames = 50
