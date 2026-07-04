@@ -13,12 +13,15 @@ and structured data from search results.
 import os
 import re
 import sys
+import json
 from contextlib import contextmanager
 from html import unescape
+from pathlib import Path
 from urllib.parse import quote
 import requests
 import atexit
 from datetime import datetime
+from dotenv import load_dotenv
 
 try:
     from selenium import webdriver
@@ -36,6 +39,11 @@ except ImportError:
     EC = None
 
 from modules.module_messageQue import queue_message
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BASE_DIR.parent
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(BASE_DIR / ".env", override=False)
 
 NAVER_ENDPOINTS = {
     "blog": "/v1/search/blog.json",
@@ -123,13 +131,15 @@ def save_debug():
     """
     Save the current page source for debugging purposes.
     """
-    with open("engine/debug.html", "w", encoding='utf-8') as f:
-        f.write(driver.page_source)
+    debug_path = BASE_DIR / "engine" / "debug.html"
+    debug_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(debug_path, "w", encoding='utf-8') as f:
+        f.write(get_driver().page_source)
 
 def wait_for_element(element_id: str, delay: int = 10):
     """Wait for an element with a specific ID to be present."""
     try:
-        WebDriverWait(driver, delay).until(EC.presence_of_element_located((By.ID, element_id)))
+        WebDriverWait(get_driver(), delay).until(EC.presence_of_element_located((By.ID, element_id)))
     except Exception:
         queue_message(f"ERROR: Element with ID '{element_id}' not found.")
         
@@ -143,7 +153,7 @@ def extract_text(selector):
     Returns:
     - str: Concatenated text content of matched elements.
     """
-    return '\n'.join(el.text for el in driver.find_elements(By.CSS_SELECTOR, selector) if el and el.text).strip()
+    return '\n'.join(el.text for el in get_driver().find_elements(By.CSS_SELECTOR, selector) if el and el.text).strip()
 
 def extract_links(selector):
     """
@@ -155,7 +165,7 @@ def extract_links(selector):
     Returns:
     - list: List of extracted hyperlinks.
     """
-    return [el.get_attribute('href') for el in driver.find_elements(By.CSS_SELECTOR, selector) if el and el.text]
+    return [el.get_attribute('href') for el in get_driver().find_elements(By.CSS_SELECTOR, selector) if el and el.text]
 
 
 def _naver_category_for_query(query, category="auto"):
@@ -174,6 +184,134 @@ def _naver_category_for_query(query, category="auto"):
     return "web"
 
 
+def _naver_search_once(query, category, display):
+    endpoint = NAVER_ENDPOINTS.get(category, NAVER_ENDPOINTS["web"])
+    url = f"https://openapi.naver.com{endpoint}"
+    client_id, client_secret = _naver_credentials()
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    params = {
+        "query": query,
+        "display": max(1, min(int(display), 10)),
+        "sort": "date" if category == "news" else "sim",
+    }
+
+    queue_message(f"INFO: Searching Naver {category} for: {query}")
+    response = requests.get(url, headers=headers, params=params, timeout=8)
+    response.raise_for_status()
+    items = response.json().get("items", [])
+    queue_message(f"INFO: Naver {category} returned {len(items)} results")
+    return items
+
+
+def _naver_fallback_categories(category):
+    if category == "news":
+        return ["news", "web", "blog"]
+    if category == "shopping":
+        return ["shopping", "web", "blog"]
+    if category == "knowledge":
+        return ["knowledge", "web", "blog"]
+    if category == "local":
+        return ["local", "web", "blog"]
+    return [category]
+
+
+def _extract_json_object(text):
+    match = re.search(r"\{.*\}", text or "", re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+
+def _normalize_naver_category(category):
+    category = (category or "").strip().lower()
+    aliases = {
+        "shop": "shopping",
+        "shopping": "shopping",
+        "product": "shopping",
+        "products": "shopping",
+        "kin": "knowledge",
+        "knowledge": "knowledge",
+        "webkr": "web",
+        "web": "web",
+        "news": "news",
+        "blog": "blog",
+        "cafe": "cafe",
+        "book": "book",
+        "image": "image",
+        "local": "local",
+    }
+    return aliases.get(category, "web")
+
+
+def plan_search_query(user_query, category_hint="auto"):
+    """
+    Ask the configured LLM to turn a natural-language question into search keywords.
+    Falls back to the original query if planning fails.
+    """
+    fallback_category = _naver_category_for_query(user_query, category_hint)
+    fallback = {
+        "should_search": True,
+        "query": (user_query or "").strip(),
+        "category": fallback_category,
+    }
+
+    try:
+        from modules.module_llm import raw_complete_llm
+    except Exception as e:
+        queue_message(f"WARNING: Search planner unavailable: {e}")
+        return fallback
+
+    prompt = f"""
+You are a search query planner for a Korean voice assistant.
+Return ONLY one JSON object with:
+{{"should_search": true|false, "query": "...", "category": "news|shopping|web|knowledge|blog|local"}}
+
+Rules:
+- Convert the user's natural Korean question into concise search keywords.
+- Preserve important proper nouns, dates, teams, product names, places, model names, and numbers.
+- Remove conversational filler like "누가 이겼어", "알려줘", "추천해줘" unless it is needed as a keyword.
+- For live/recent events, sports results, announcements, and headlines use category "news".
+- For prices/products/models/reviews/purchases use category "shopping".
+- For how-to, meanings, or general explanations use category "web" or "knowledge".
+- If no external/current information is needed, set should_search false.
+- Today's date is {datetime.now().strftime('%Y-%m-%d')}.
+- Category hint from router: {category_hint}
+
+User question: {user_query}
+JSON:
+""".strip()
+
+    planned_text = raw_complete_llm(prompt)
+    planned = _extract_json_object(planned_text)
+    if not isinstance(planned, dict):
+        queue_message("WARNING: Search planner returned invalid JSON; using original query.")
+        return fallback
+
+    if planned.get("should_search") is False:
+        return {
+            "should_search": False,
+            "query": fallback["query"],
+            "category": fallback["category"],
+        }
+
+    planned_query = str(planned.get("query") or "").strip()
+    if not planned_query:
+        planned_query = fallback["query"]
+    planned_category = _normalize_naver_category(planned.get("category") or fallback_category)
+    queue_message(f"INFO: Search planner query='{planned_query}' category={planned_category}")
+    return {
+        "should_search": True,
+        "query": planned_query,
+        "category": planned_category,
+    }
+
+
 def search_naver(query, category="auto", display=5):
     """
     Search Naver using the official Search API.
@@ -184,27 +322,40 @@ def search_naver(query, category="auto", display=5):
     if not client_id or not client_secret:
         raise RuntimeError("Naver Search API credentials are missing.")
 
-    resolved_category = _naver_category_for_query(query, category)
-    endpoint = NAVER_ENDPOINTS.get(resolved_category, NAVER_ENDPOINTS["web"])
-    url = f"https://openapi.naver.com{endpoint}"
-    headers = {
-        "X-Naver-Client-Id": client_id,
-        "X-Naver-Client-Secret": client_secret,
-    }
-    params = {
-        "query": query,
-        "display": max(1, min(int(display), 10)),
-        "sort": "date" if resolved_category == "news" else "sim",
-    }
+    plan = plan_search_query(query, category)
+    if not plan.get("should_search", True):
+        return "Search planner decided no external search is needed."
 
-    queue_message(f"INFO: Searching Naver {resolved_category} for: {query}")
-    response = requests.get(url, headers=headers, params=params, timeout=8)
-    response.raise_for_status()
-    items = response.json().get("items", [])
+    planned_query = plan.get("query") or query
+    resolved_category = _normalize_naver_category(plan.get("category")) or _naver_category_for_query(query, category)
+    tried_categories = []
+    tried_queries = []
+    items = []
+    used_category = resolved_category
+    used_query = planned_query
+    query_variants = [planned_query]
+    if planned_query != query:
+        query_variants.append(query)
+
+    for candidate in _naver_fallback_categories(resolved_category):
+        tried_categories.append(candidate)
+        for query_variant in query_variants:
+            tried_queries.append(query_variant)
+            used_category = candidate
+            used_query = query_variant
+            items = _naver_search_once(query_variant, candidate, display)
+            if items:
+                break
+        if items:
+            break
     if not items:
-        return "검색 결과가 비어 있습니다."
+        return (
+            f"Naver search returned no results for '{query}'. "
+            f"Tried categories: {', '.join(tried_categories)}. "
+            f"Tried queries: {', '.join(tried_queries)}."
+        )
 
-    lines = [f"Naver {resolved_category} search results for '{query}':"]
+    lines = [f"Naver {used_category} search results for '{used_query}':"]
     for index, item in enumerate(items[:display], 1):
         title = _strip_html(item.get("title"))
         summary = _strip_html(
