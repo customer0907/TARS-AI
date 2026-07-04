@@ -38,7 +38,7 @@ import socket
 import re
 
 # === Custom Modules ===
-from modules.module_websearch import search_google, search_google_news
+from modules.module_websearch import search_news, search_web
 from modules.module_weather import get_weather
 from modules.module_vision import describe_camera_view
 from modules.module_stablediffusion import generate_image
@@ -270,6 +270,19 @@ _WEATHER_HINT = re.compile(
     r"(날씨|비|눈|우산|기온|추워|더워|미세|습도|맑|흐림|소나기|강수)",
     re.I,
 )
+_SEARCH_EXPLICIT_HINT = re.compile(r"(검색|찾아|찾아봐|알아봐)", re.I)
+_SEARCH_CURRENT_HINT = re.compile(r"(최신|요즘|최근|오늘|어제|지금)", re.I)
+_SEARCH_FACT_HINT = re.compile(
+    r"(가격|최저가|시세|환율|주가|뉴스|속보|발표|출시|"
+    r"누가\s*이겼|이겼어|결과|경기|스코어|순위)",
+    re.I,
+)
+_SEARCH_PRODUCT_HINT = re.compile(
+    r"(제품|모델|제습기|에어컨|노트북|컴퓨터|폰|휴대폰|모니터|"
+    r"키보드|마우스|이어폰|헤드셋|과자|음식|후기|리뷰|구매|판매|"
+    r"적용\s*면적|평형|용량)",
+    re.I,
+)
 
 
 def _is_date_or_time_only(user_input):
@@ -279,6 +292,20 @@ def _is_date_or_time_only(user_input):
 
 def _has_weather_hint(user_input):
     return bool(_WEATHER_HINT.search(user_input or ""))
+
+
+def _has_search_hint(user_input):
+    """Force Search for current facts, products, prices, scores, and explicit lookups."""
+    text = user_input or ""
+    if _SEARCH_EXPLICIT_HINT.search(text):
+        return True
+    if _SEARCH_FACT_HINT.search(text):
+        return True
+    if _SEARCH_CURRENT_HINT.search(text) and _SEARCH_PRODUCT_HINT.search(text):
+        return True
+    if "추천" in text and _SEARCH_PRODUCT_HINT.search(text):
+        return True
+    return False
 
 
 def _weather_prediction_allowed(user_input, predicted_class):
@@ -306,6 +333,14 @@ def check_for_module(user_input):
         if map_prompt_to_ha_service(user_input):
             queue_message("TOOL: HA keyword match")
             return send_prompt_to_homeassistant(user_input)
+
+    if _has_weather_hint(user_input):
+        queue_message("TOOL: Weather keyword match")
+        return call_function("Weather", user_input)
+
+    if _has_search_hint(user_input):
+        queue_message("TOOL: Search keyword match")
+        return call_function("Search", user_input)
 
     predicted_class, probability = predict_class(user_input)
     if not predicted_class:
@@ -576,10 +611,10 @@ def adjust_persona(user_input):
 # === Function Calling ===
 FUNCTION_REGISTRY = {
     "Weather": get_weather,
-    "News": search_google_news,
+    "News": search_news,
     "Move": movement_llmcall,
     "Vision": describe_camera_view,
-    "Search": search_google,
+    "Search": search_web,
     "SDmodule-Generate": generate_image,
     "Volume": handle_volume_command,
     "Persona": adjust_persona,

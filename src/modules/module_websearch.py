@@ -11,18 +11,59 @@ and structured data from search results.
 
 # === Standard Libraries ===
 import os
+import re
 import sys
 from contextlib import contextmanager
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from html import unescape
+from urllib.parse import quote
+import requests
 import atexit
 from datetime import datetime
 
+try:
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.chrome.service import Service as ChromeService
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+except ImportError:
+    webdriver = None
+    By = None
+    ChromeOptions = None
+    ChromeService = None
+    WebDriverWait = None
+    EC = None
+
 from modules.module_messageQue import queue_message
+
+NAVER_ENDPOINTS = {
+    "blog": "/v1/search/blog.json",
+    "news": "/v1/search/news.json",
+    "shopping": "/v1/search/shop.json",
+    "web": "/v1/search/webkr.json",
+    "knowledge": "/v1/search/kin.json",
+    "cafe": "/v1/search/cafearticle.json",
+    "book": "/v1/search/book.json",
+    "image": "/v1/search/image.json",
+    "local": "/v1/search/local.json",
+}
+
+
+def _strip_html(text):
+    text = re.sub(r"<[^>]+>", "", text or "")
+    return unescape(text).strip()
+
+
+def _naver_credentials():
+    client_id = os.getenv("NAVER_CLIENT_ID", "").strip()
+    client_secret = os.getenv("NAVER_CLIENT_SECRET", "").strip()
+    return client_id, client_secret
+
+
+def is_naver_search_available():
+    client_id, client_secret = _naver_credentials()
+    return bool(client_id and client_secret)
 
 # === Helper Functions ===
 # Silence logs to suppress unnecessary outputs
@@ -47,6 +88,9 @@ def initialize_driver():
     Returns:
     - WebDriver: Configured Selenium WebDriver instance.
     """
+    if webdriver is None:
+        raise RuntimeError("Selenium is not installed; browser search fallback is unavailable.")
+
     options = ChromeOptions()
     options.add_argument("--headless")  # Run in headless mode
     options.add_argument("--no-sandbox")  # Bypass OS security model
@@ -56,6 +100,17 @@ def initialize_driver():
 
     service = ChromeService(executable_path="/usr/bin/chromedriver")  # Path to the chromedriver
     return webdriver.Chrome(service=service, options=options)
+
+
+driver = None
+
+
+def get_driver():
+    """Start Selenium only when a scraping fallback is actually needed."""
+    global driver
+    if driver is None:
+        driver = initialize_driver()
+    return driver
 
 def quit_driver():
     """
@@ -102,6 +157,88 @@ def extract_links(selector):
     """
     return [el.get_attribute('href') for el in driver.find_elements(By.CSS_SELECTOR, selector) if el and el.text]
 
+
+def _naver_category_for_query(query, category="auto"):
+    if category != "auto":
+        return category
+
+    text = (query or "").lower()
+    if re.search(r"뉴스|속보|헤드라인|경기 결과|누가 이겼|score|news|result", text):
+        return "news"
+    if re.search(r"가격|제품|추천|구매|쇼핑|최저가|제습기|과자|shop|price|buy", text):
+        return "shopping"
+    if re.search(r"맛집|근처|주소|영업|병원|카페|local|near", text):
+        return "local"
+    if re.search(r"뜻|방법|원리|지식|뭐야|왜|어떻게|kin", text):
+        return "knowledge"
+    return "web"
+
+
+def search_naver(query, category="auto", display=5):
+    """
+    Search Naver using the official Search API.
+
+    category can be auto, news, shopping, web, knowledge, blog, cafe, book, image, local.
+    """
+    client_id, client_secret = _naver_credentials()
+    if not client_id or not client_secret:
+        raise RuntimeError("Naver Search API credentials are missing.")
+
+    resolved_category = _naver_category_for_query(query, category)
+    endpoint = NAVER_ENDPOINTS.get(resolved_category, NAVER_ENDPOINTS["web"])
+    url = f"https://openapi.naver.com{endpoint}"
+    headers = {
+        "X-Naver-Client-Id": client_id,
+        "X-Naver-Client-Secret": client_secret,
+    }
+    params = {
+        "query": query,
+        "display": max(1, min(int(display), 10)),
+        "sort": "date" if resolved_category == "news" else "sim",
+    }
+
+    queue_message(f"INFO: Searching Naver {resolved_category} for: {query}")
+    response = requests.get(url, headers=headers, params=params, timeout=8)
+    response.raise_for_status()
+    items = response.json().get("items", [])
+    if not items:
+        return "검색 결과가 비어 있습니다."
+
+    lines = [f"Naver {resolved_category} search results for '{query}':"]
+    for index, item in enumerate(items[:display], 1):
+        title = _strip_html(item.get("title"))
+        summary = _strip_html(
+            item.get("description")
+            or item.get("link")
+            or item.get("mallName")
+            or item.get("address")
+        )
+        link = item.get("link") or item.get("originallink") or ""
+        line = f"{index}. {title}"
+        if summary:
+            line += f" - {summary}"
+        if link:
+            line += f" ({link})"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def search_web(query):
+    """Single WebSearch tool entrypoint: prefer Naver API, fallback to Google scraping."""
+    if is_naver_search_available():
+        return search_naver(query, category="auto")
+    queue_message("INFO: Naver credentials missing; falling back to Google search.")
+    return search_google(query)
+
+
+def search_news(query):
+    """News tool entrypoint: prefer Naver News API, fallback to Google News scraping."""
+    if is_naver_search_available():
+        return search_naver(query, category="news")
+    queue_message("INFO: Naver credentials missing; falling back to Google News search.")
+    return search_google_news(query)
+
 # === Search Functions ===
 def search_query(url, query, content_selector, link_selector=None):
     """
@@ -116,7 +253,7 @@ def search_query(url, query, content_selector, link_selector=None):
     Returns:
     - tuple: Extracted text content and links (if applicable).
     """
-    driver.get(url + query)
+    get_driver().get(url + query)
     wait_for_element('res')  # Wait for page to load
 
     content = extract_text(content_selector)
@@ -134,7 +271,7 @@ def search_google(query):
     - tuple: Extracted content and links.
     """
     queue_message(f"INFO: Searching Google for: {query}")
-    driver.get("https://google.com/search?hl=en&q=" + query)
+    get_driver().get("https://google.com/search?hl=en&q=" + query)
     wait_for_element('res')
     save_debug()
 
@@ -202,7 +339,7 @@ def search_mojeek(query):
     full_url = base_url + query
 
     # Load the page
-    driver.get(full_url)
+    get_driver().get(full_url)
     wait_for_element("results")  # Wait for results container to load
 
     # Extract search result snippets
@@ -227,7 +364,7 @@ def search_mojeek_summary(query):
 
     try:
         # Load the Mojeek search results page
-        driver.get(full_url)
+        get_driver().get(full_url)
 
         # Save page source for debugging
         save_debug()
@@ -255,6 +392,5 @@ def search_mojeek_summary(query):
         return "Summary not found. Check debug.html for details."
 
 
-# === Initialize and Cleanup ===
-driver = initialize_driver()
+# === Cleanup ===
 atexit.register(quit_driver)
