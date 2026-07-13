@@ -230,6 +230,7 @@ def load_config():
             "voicemovement": config['CONTROLS']['voicemovement'],         
         },
         "STT": {
+            "input_device": config.get('STT', 'input_device', fallback='').strip(),
             "wake_word": _lang_get('STT', 'wake_word'),
             "sensitivity": config['STT']['sensitivity'],
             "stt_processor": config['STT']['stt_processor'],

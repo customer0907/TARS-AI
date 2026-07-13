@@ -1278,9 +1278,53 @@ class STTManager:
         return self.mic_index
 
     def _resolve_input_device(self):
-        """Select the first available input device."""
+        """Select the configured input device, or retain the legacy first-input fallback."""
         try:
             devices = sd.query_devices()
+            configured = str(
+                self.config.get('STT', {}).get('input_device', '') or ''
+            ).strip()
+
+            if configured:
+                if configured.isdigit():
+                    index = int(configured)
+                    if index >= len(devices) or devices[index]['max_input_channels'] <= 0:
+                        raise ValueError(
+                            f"Configured input_device index {index} is not an input device."
+                        )
+                    device = devices[index]
+                    print(f"Using configured input device: {device['name']} (Index: {index})")
+                    return index
+
+                configured_lower = configured.lower()
+                input_devices = [
+                    (i, device)
+                    for i, device in enumerate(devices)
+                    if device['max_input_channels'] > 0
+                ]
+                exact_matches = [
+                    (i, device)
+                    for i, device in input_devices
+                    if device['name'].lower() == configured_lower
+                ]
+                partial_matches = [
+                    (i, device)
+                    for i, device in input_devices
+                    if configured_lower in device['name'].lower()
+                ]
+                matches = exact_matches or partial_matches
+                if not matches:
+                    available = ", ".join(
+                        f"{i}: {device['name']}" for i, device in input_devices
+                    )
+                    raise ValueError(
+                        f"Configured input_device '{configured}' was not found. "
+                        f"Available inputs: {available or 'none'}"
+                    )
+                index, device = matches[0]
+                print(f"Using configured input device: {device['name']} (Index: {index})")
+                return index
+
             for i, device in enumerate(devices):
                 if device['max_input_channels'] > 0:
                     print(f"Using input device: {device['name']} (Index: {i})")

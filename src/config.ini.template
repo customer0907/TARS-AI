@@ -38,6 +38,10 @@ session_timeout_seconds = 540
 # 540s stays below the documented approximate 10-minute connection lifetime.
 
 [STT] # Speech-to-Text configuration
+input_device =
+# Optional sounddevice input index or case-insensitive name fragment.
+# Example: input_device = USB PnP Sound Device
+# Leave blank to keep the existing first-input-device behavior.
 wake_word = hey tar
 wake_word_ko = amy,yooni
 # Wake phrase(s) for Vosk. Comma-separated: amy,yooni,hey tar
