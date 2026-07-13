@@ -189,6 +189,11 @@ def load_config():
             "voice_name": config.get(
                 'GEMINI_LIVE', 'voice_name', fallback='Kore'
             ).strip(),
+            "language_code": config.get(
+                'GEMINI_LIVE',
+                'language_code',
+                fallback='ko-KR' if language == 'ko' else 'en-US',
+            ).strip(),
             "thinking_level": config.get(
                 'GEMINI_LIVE', 'thinking_level', fallback='minimal'
             ).strip().lower(),
@@ -209,6 +214,29 @@ def load_config():
             ),
             "stream_output_transcript": config.getboolean(
                 'GEMINI_LIVE', 'stream_output_transcript', fallback=True
+            ),
+            "input_preprocessing": config.getboolean(
+                'GEMINI_LIVE', 'input_preprocessing', fallback=True
+            ),
+            "input_highpass_hz": max(
+                0.0,
+                config.getfloat('GEMINI_LIVE', 'input_highpass_hz', fallback=80.0),
+            ),
+            "input_noise_gate_dbfs": config.getfloat(
+                'GEMINI_LIVE', 'input_noise_gate_dbfs', fallback=-48.0
+            ),
+            "input_noise_attenuation_db": max(
+                0.0,
+                config.getfloat(
+                    'GEMINI_LIVE', 'input_noise_attenuation_db', fallback=18.0
+                ),
+            ),
+            "input_target_dbfs": config.getfloat(
+                'GEMINI_LIVE', 'input_target_dbfs', fallback=-24.0
+            ),
+            "input_max_gain_db": max(
+                0.0,
+                config.getfloat('GEMINI_LIVE', 'input_max_gain_db', fallback=12.0),
             ),
             "mute_input_during_playback": config.getboolean(
                 'GEMINI_LIVE', 'mute_input_during_playback', fallback=True

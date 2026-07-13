@@ -14,6 +14,8 @@ mode = traditional
 [GEMINI_LIVE]
 model = gemini-3.1-flash-live-preview
 voice_name = Kore
+language_code = ko-KR
+# BCP-47 speech/language hint. Korean: ko-KR, English: en-US.
 thinking_level = minimal
 temperature = 0.8
 native_google_search = false
@@ -28,6 +30,18 @@ home_assistant_tool = true
 save_transcripts = true
 # Show Gemini's output transcript while its audio response is still playing.
 stream_output_transcript = true
+input_preprocessing = true
+# Approximate the browser demo's microphone processing for raw sounddevice audio.
+input_highpass_hz = 80
+# Remove low-frequency rumble/DC before recognition. Set 0 to disable.
+input_noise_gate_dbfs = -48
+# Audio below this normalized RMS level is treated as background noise.
+input_noise_attenuation_db = 18
+# Attenuation applied to quiet background noise; this is not a hard mute.
+input_target_dbfs = -24
+# Conservative automatic gain target for speech.
+input_max_gain_db = 12
+# Maximum automatic boost so cheap-mic hiss is not amplified without limit.
 mute_input_during_playback = true
 # true = speaker-safe half duplex; blocks Gemini's own voice from re-entering the mic.
 # false = full duplex/barge-in, recommended only with headphones or hardware echo cancellation.

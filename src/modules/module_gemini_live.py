@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import audioop
 import contextlib
+import math
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -105,6 +107,10 @@ class GeminiLiveSession:
         self._types = None
         self._playback = _PlaybackBuffer()
         self._input_sample_rate = INPUT_SAMPLE_RATE
+        self._ratecv_state = None
+        self._highpass_previous_input = 0.0
+        self._highpass_previous_output = 0.0
+        self._input_gain = 1.0
         self._mute_input_until = 0.0
         self._input_transcript = ""
         self._output_transcript = ""
@@ -242,6 +248,8 @@ class GeminiLiveSession:
             "response_modalities": ["AUDIO"],
             "system_instruction": self.build_system_instruction(),
             "speech_config": {
+                "language_code": self.live_config.get("language_code")
+                or ("ko-KR" if self.config.get("CHAR", {}).get("language") == "ko" else "en-US"),
                 "voice_config": {
                     "prebuilt_voice_config": {
                         "voice_name": self.live_config.get("voice_name", "Kore")
@@ -298,6 +306,10 @@ class GeminiLiveSession:
         self._input_queue = asyncio.Queue(maxsize=64)
         self._stop = asyncio.Event()
         self._playback.clear()
+        self._ratecv_state = None
+        self._highpass_previous_input = 0.0
+        self._highpass_previous_output = 0.0
+        self._input_gain = 1.0
 
         client = genai.Client(api_key=api_key)
         model = self.live_config.get("model", "gemini-3.1-flash-live-preview")
@@ -371,7 +383,7 @@ class GeminiLiveSession:
                 fallback_rate = 44100
             queue_message(
                 f"INFO: Microphone does not expose 16 kHz; using {fallback_rate} Hz "
-                "and Gemini server-side resampling."
+                "and locally resampling to 16 kHz."
             )
             return fallback_rate
 
@@ -435,12 +447,71 @@ class GeminiLiveSession:
                 data = await asyncio.wait_for(self._input_queue.get(), timeout=0.25)
             except asyncio.TimeoutError:
                 continue
+            data = self._prepare_input_audio(data)
             await session.send_realtime_input(
                 audio=self._types.Blob(
                     data=data,
-                    mime_type=f"audio/pcm;rate={self._input_sample_rate}",
+                    mime_type=f"audio/pcm;rate={INPUT_SAMPLE_RATE}",
                 )
             )
+
+    def _prepare_input_audio(self, data: bytes) -> bytes:
+        """Apply conservative mic cleanup and produce Gemini-native 16 kHz PCM16."""
+        if not data:
+            return data
+
+        processed = data
+        if self.live_config.get("input_preprocessing", True):
+            import numpy as np
+
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            highpass_hz = float(self.live_config.get("input_highpass_hz", 80.0))
+            if highpass_hz > 0 and samples.size:
+                dt = 1.0 / self._input_sample_rate
+                rc = 1.0 / (2.0 * math.pi * highpass_hz)
+                alpha = rc / (rc + dt)
+                previous_input = self._highpass_previous_input
+                previous_output = self._highpass_previous_output
+                for index in range(samples.size):
+                    current_input = float(samples[index])
+                    previous_output = alpha * (
+                        previous_output + current_input - previous_input
+                    )
+                    samples[index] = previous_output
+                    previous_input = current_input
+                self._highpass_previous_input = previous_input
+                self._highpass_previous_output = previous_output
+
+            rms = float(np.sqrt(np.mean(samples * samples))) if samples.size else 0.0
+            rms_dbfs = 20.0 * math.log10(max(rms, 1e-8))
+            gate_dbfs = float(self.live_config.get("input_noise_gate_dbfs", -48.0))
+            if rms_dbfs < gate_dbfs:
+                attenuation_db = float(
+                    self.live_config.get("input_noise_attenuation_db", 18.0)
+                )
+                samples *= 10.0 ** (-attenuation_db / 20.0)
+            else:
+                target_dbfs = float(self.live_config.get("input_target_dbfs", -24.0))
+                max_gain_db = float(self.live_config.get("input_max_gain_db", 12.0))
+                desired_gain_db = min(max(target_dbfs - rms_dbfs, -6.0), max_gain_db)
+                desired_gain = 10.0 ** (desired_gain_db / 20.0)
+                self._input_gain = (0.85 * self._input_gain) + (0.15 * desired_gain)
+                samples *= self._input_gain
+
+            processed = (
+                np.clip(samples, -1.0, 0.999969) * 32768.0
+            ).astype(np.int16).tobytes()
+
+        if self._input_sample_rate != INPUT_SAMPLE_RATE:
+            processed, self._ratecv_state = audioop.ratecv(
+                processed,
+                2,
+                1,
+                self._input_sample_rate,
+                INPUT_SAMPLE_RATE,
+                self._ratecv_state,
+            )
+        return processed
 
     async def _receive(self, session) -> None:
         while not self._stop.is_set():
