@@ -29,7 +29,16 @@ from modules.module_memory import MemoryManager
 from modules.module_stt import STTManager
 from modules.module_tts import update_tts_settings
 from modules.module_btcontroller import *
-from modules.module_main import initialize_managers, wake_word_callback, utterance_callback, post_utterance_callback, start_bt_controller_thread, start_discord_bot, process_discord_message_callback
+from modules.module_main import (
+    gemini_live_session_callback,
+    initialize_managers,
+    post_utterance_callback,
+    process_discord_message_callback,
+    start_bt_controller_thread,
+    start_discord_bot,
+    utterance_callback,
+    wake_word_callback,
+)
 from modules.module_vision import initialize_blip
 from modules.module_llm import initialize_manager_llm
 import modules.module_chatui
@@ -82,6 +91,7 @@ if __name__ == "__main__":
     stt_manager.set_wake_word_callback(wake_word_callback)
     stt_manager.set_utterance_callback(utterance_callback)
     stt_manager.set_post_utterance_callback(post_utterance_callback)
+    stt_manager.set_live_session_callback(gemini_live_session_callback)
 
     # DISCORD Callback
     if CONFIG['DISCORD']['enabled'] == 'True':
@@ -121,6 +131,9 @@ if __name__ == "__main__":
 
     try:
         queue_message(f"LOAD: TARS-AI v1.03a running.")
+        queue_message(
+            f"LOAD: Voice pipeline: {CONFIG['VOICE_PIPELINE']['mode']}"
+        )
         stt_manager.start()
 
         while not shutdown_event.is_set():

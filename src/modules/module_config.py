@@ -166,9 +166,54 @@ def load_config():
         queue_message("ERROR: [PERSONA] section missing in persona.ini.")
         sys.exit(1)
 
+    voice_pipeline_mode = config.get(
+        'VOICE_PIPELINE', 'mode', fallback='traditional'
+    ).strip().lower()
+    if voice_pipeline_mode not in ('traditional', 'gemini_live'):
+        queue_message(
+            "ERROR: [VOICE_PIPELINE] mode must be 'traditional' or 'gemini_live'."
+        )
+        sys.exit(1)
+
     # Extract and return combined configurations
     return {
         "BASE_DIR": base_dir,
+        "VOICE_PIPELINE": {
+            "mode": voice_pipeline_mode,
+        },
+        "GEMINI_LIVE": {
+            "api_key": os.getenv('GEMINI_API_KEY'),
+            "model": config.get(
+                'GEMINI_LIVE', 'model', fallback='gemini-3.1-flash-live-preview'
+            ).strip(),
+            "voice_name": config.get(
+                'GEMINI_LIVE', 'voice_name', fallback='Kore'
+            ).strip(),
+            "thinking_level": config.get(
+                'GEMINI_LIVE', 'thinking_level', fallback='minimal'
+            ).strip().lower(),
+            "temperature": config.getfloat(
+                'GEMINI_LIVE', 'temperature', fallback=0.8
+            ),
+            "native_google_search": config.getboolean(
+                'GEMINI_LIVE', 'native_google_search', fallback=False
+            ),
+            "traditional_tool_fallback": config.getboolean(
+                'GEMINI_LIVE', 'traditional_tool_fallback', fallback=True
+            ),
+            "home_assistant_tool": config.getboolean(
+                'GEMINI_LIVE', 'home_assistant_tool', fallback=True
+            ),
+            "save_transcripts": config.getboolean(
+                'GEMINI_LIVE', 'save_transcripts', fallback=True
+            ),
+            "session_timeout_seconds": max(
+                0,
+                config.getint(
+                    'GEMINI_LIVE', 'session_timeout_seconds', fallback=540
+                ),
+            ),
+        },
         "CONTROLS": {
             "controller_name": config['CONTROLS']['controller_name'],
             "enabled": config['CONTROLS']['enabled'],

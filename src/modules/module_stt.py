@@ -56,11 +56,13 @@ class STTManager:
         self.running = False
         self.wake_word_callback: Optional[Callable[[str], None]] = None
         self.utterance_callback: Optional[Callable[[str], None]] = None
+        self.live_session_callback: Optional[Callable[[], None]] = None
         self.amp_gain = amp_gain  # Amplification gain factor
         self.post_utterance_callback: Optional[Callable] = None
         self.vosk_model = None
         self.faster_whisper_model = None
-        self._load_whisper_model()
+        if self.config.get("VOICE_PIPELINE", {}).get("mode") != "gemini_live":
+            self._load_whisper_model()
         self.silence_threshold = 10  # Default value; updated dynamically
         self.MAX_SILENT_FRAMES = 100
         self.MAX_RECORDING_FRAMES = int(
@@ -684,6 +686,20 @@ class STTManager:
                 if self._detect_wake_word():
                     self._stt_debug_reset()
                     self._stt_debug("wake session start")
+                    pipeline_mode = self.config.get("VOICE_PIPELINE", {}).get(
+                        "mode", "traditional"
+                    )
+                    if pipeline_mode == "gemini_live":
+                        if self.live_session_callback:
+                            self.live_session_callback()
+                        else:
+                            queue_message(
+                                "ERROR: Gemini Live mode has no session callback configured."
+                            )
+                        self._release_audio_input()
+                        self._stt_debug("Gemini Live wake session end")
+                        continue
+
                     empty_attempts = 0
                     while self.running:
                         self._stt_debug(
@@ -1389,6 +1405,10 @@ class STTManager:
         Set the callback function for user utterance.
         """
         self.utterance_callback = callback
+
+    def set_live_session_callback(self, callback: Callable[[], None]):
+        """Set the callback that owns one wake-triggered Gemini Live session."""
+        self.live_session_callback = callback
 
     def set_post_utterance_callback(self, callback):
         """

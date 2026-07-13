@@ -6,6 +6,30 @@ enabled = False
 voicemovement = False
 #Enable or disable movement via voice control
 
+[VOICE_PIPELINE]
+mode = traditional
+# traditional = existing wake word -> STT -> LLM/tools -> TTS pipeline
+# gemini_live = wake word -> Gemini Live native audio session
+
+[GEMINI_LIVE]
+model = gemini-3.1-flash-live-preview
+voice_name = Kore
+thinking_level = minimal
+temperature = 0.8
+native_google_search = false
+# false = let delegate_to_traditional_pipeline reuse TARS Search/News/providers.
+# true = also expose Gemini Live's native Google Search grounding.
+traditional_tool_fallback = true
+# Allows Live to hand current facts, web search, and other TARS tools to process_completion().
+# This adds the latency and possible API cost of the configured traditional LLM for delegated turns.
+home_assistant_tool = true
+# Exposes the existing Home Assistant command path when HOME_ASSISTANT.enabled = True.
+save_transcripts = true
+# Store completed Live turns in the existing TARS short/long-term memory path.
+session_timeout_seconds = 540
+# Session safety limit only. Per-utterance silence/listen timing remains Gemini automatic VAD.
+# 540s stays below the documented approximate 10-minute connection lifetime.
+
 [STT] # Speech-to-Text configuration
 wake_word = hey tar
 wake_word_ko = amy,yooni

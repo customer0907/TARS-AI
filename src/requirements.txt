@@ -1,5 +1,6 @@
 # LLM Tools
 openai                  # External LLM API
+google-genai>=2.7.0     # Gemini Live API SDK (only used in gemini_live mode)
 tiktoken                # Token counting for OpenAI models
 sentence-transformers   # Sentence embeddings and semantic search
 
