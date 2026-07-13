@@ -113,6 +113,7 @@ class GeminiLiveSession:
         self._input_gain = 1.0
         self._mute_input_until = 0.0
         self._input_transcript = ""
+        self._input_transcript_logged = False
         self._output_transcript = ""
         self._output_stream_started = False
         self._turn_index = 0
@@ -555,6 +556,8 @@ class GeminiLiveSession:
             self._input_transcript = _merge_transcript(
                 self._input_transcript, getattr(input_tx, "text", "")
             )
+            if getattr(input_tx, "finished", False):
+                self._log_input_transcript()
         output_tx = getattr(server_content, "output_transcription", None)
         if output_tx:
             self._output_transcript = _merge_transcript(
@@ -564,6 +567,7 @@ class GeminiLiveSession:
                 self._output_transcript
                 and self.live_config.get("stream_output_transcript", True)
             ):
+                self._log_input_transcript()
                 queue_live_update(
                     self._output_stream_key(),
                     f"TARS: {self._output_transcript}",
@@ -626,7 +630,7 @@ class GeminiLiveSession:
 
         if assistant_text and streamed_output:
             self._finish_output_stream()
-        if user_text:
+        if user_text and not self._input_transcript_logged:
             queue_message(f"USER: {user_text}")
         if assistant_text and not streamed_output:
             queue_message(f"TARS: {assistant_text}")
@@ -636,12 +640,21 @@ class GeminiLiveSession:
             )
 
         self._input_transcript = ""
+        self._input_transcript_logged = False
         self._output_transcript = ""
         self._delegated_current_turn = False
         self._turn_index += 1
 
     def _output_stream_key(self) -> str:
         return f"gemini-live-output-{self._turn_index}"
+
+    def _log_input_transcript(self) -> None:
+        if self._input_transcript_logged:
+            return
+        user_text = self._input_transcript.strip()
+        if user_text:
+            queue_message(f"USER: {user_text}")
+            self._input_transcript_logged = True
 
     def _finish_output_stream(self) -> None:
         if not self._output_stream_started:
