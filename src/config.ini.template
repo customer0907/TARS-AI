@@ -26,6 +26,11 @@ home_assistant_tool = true
 # Exposes the existing Home Assistant command path when HOME_ASSISTANT.enabled = True.
 save_transcripts = true
 # Store completed Live turns in the existing TARS short/long-term memory path.
+mute_input_during_playback = true
+# true = speaker-safe half duplex; blocks Gemini's own voice from re-entering the mic.
+# false = full duplex/barge-in, recommended only with headphones or hardware echo cancellation.
+echo_tail_ms = 600
+# Keep the mic muted briefly after playback to absorb room/speaker echo.
 session_timeout_seconds = 540
 # Session safety limit only. Per-utterance silence/listen timing remains Gemini automatic VAD.
 # 540s stays below the documented approximate 10-minute connection lifetime.

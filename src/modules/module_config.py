@@ -207,6 +207,13 @@ def load_config():
             "save_transcripts": config.getboolean(
                 'GEMINI_LIVE', 'save_transcripts', fallback=True
             ),
+            "mute_input_during_playback": config.getboolean(
+                'GEMINI_LIVE', 'mute_input_during_playback', fallback=True
+            ),
+            "echo_tail_ms": max(
+                0,
+                config.getint('GEMINI_LIVE', 'echo_tail_ms', fallback=600),
+            ),
             "session_timeout_seconds": max(
                 0,
                 config.getint(

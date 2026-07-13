@@ -46,6 +46,10 @@ class _PlaybackBuffer:
             self._data.clear()
             self._condition.notify_all()
 
+    def has_data(self) -> bool:
+        with self._condition:
+            return bool(self._data)
+
     def wait_empty(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
         with self._condition:
@@ -101,6 +105,7 @@ class GeminiLiveSession:
         self._types = None
         self._playback = _PlaybackBuffer()
         self._input_sample_rate = INPUT_SAMPLE_RATE
+        self._mute_input_until = 0.0
         self._input_transcript = ""
         self._output_transcript = ""
         self._delegated_current_turn = False
@@ -363,7 +368,7 @@ class GeminiLiveSession:
             except Exception:
                 fallback_rate = 44100
             queue_message(
-                f"WARNING: Microphone does not expose 16 kHz; using {fallback_rate} Hz "
+                f"INFO: Microphone does not expose 16 kHz; using {fallback_rate} Hz "
                 "and Gemini server-side resampling."
             )
             return fallback_rate
@@ -372,8 +377,40 @@ class GeminiLiveSession:
         del frames, time_info, status
         if not self._loop or self._loop.is_closed() or self._input_queue is None:
             return
-        data = bytes(indata)
+        if self._input_is_muted():
+            # Keep the continuous audio stream alive, but send silence instead of
+            # feeding Gemini's speaker output back into its own VAD.
+            data = b"\x00" * len(indata)
+        else:
+            data = bytes(indata)
         self._loop.call_soon_threadsafe(self._offer_input_audio, data)
+
+    def _input_is_muted(self) -> bool:
+        return bool(
+            self.live_config.get("mute_input_during_playback", True)
+            and time.monotonic() < self._mute_input_until
+        )
+
+    def _extend_input_mute(self, playback_seconds: float = 0.0) -> None:
+        if not self.live_config.get("mute_input_during_playback", True):
+            return
+        tail_seconds = float(self.live_config.get("echo_tail_ms", 600)) / 1000.0
+        self._mute_input_until = max(
+            self._mute_input_until,
+            time.monotonic() + max(0.0, playback_seconds) + tail_seconds,
+        )
+
+    def _queue_playback_audio(self, data: bytes) -> None:
+        if not data:
+            return
+        self._extend_input_mute()
+        if self._input_queue is not None:
+            while True:
+                try:
+                    self._input_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+        self._playback.append(data)
 
     def _offer_input_audio(self, data: bytes) -> None:
         if self._input_queue is None or not data:
@@ -385,7 +422,9 @@ class GeminiLiveSession:
             self._input_queue.put_nowait(data)
 
     def _output_callback(self, outdata, frames, time_info, status) -> None:
-        del frames, time_info, status
+        del time_info, status
+        if self._playback.has_data():
+            self._extend_input_mute(frames / OUTPUT_SAMPLE_RATE)
         outdata[:] = self._playback.take(len(outdata))
 
     async def _send_audio(self, session) -> None:
@@ -429,13 +468,13 @@ class GeminiLiveSession:
             mime_type = getattr(inline_data, "mime_type", "") or ""
             data = getattr(inline_data, "data", None)
             if data and mime_type.startswith("audio/"):
-                self._playback.append(data)
+                self._queue_playback_audio(data)
                 found_part_audio = True
 
         if not found_part_audio:
             data = getattr(response, "data", None)
             if data:
-                self._playback.append(data)
+                self._queue_playback_audio(data)
 
         input_tx = getattr(server_content, "input_transcription", None)
         if input_tx:
