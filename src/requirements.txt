@@ -46,7 +46,7 @@ pygame                  # Game development & multimedia support
 evdev                   # Handle Linux input devices (keyboards, mice, controllers)
 moviepy                 # Video editing and playback support
 adafruit-pca9685        # Servo driver for hardware integration
-selenium                # Web automation for browser control
+selenium>=4.45.0        # Web automation; compatible with google-genai typing-extensions
 discord.py              # Discord bot API
 discord.py[voice]       # Voice chat functionality for Discord bots
 requests                # HTTP library for API interactions
