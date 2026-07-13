@@ -207,6 +207,9 @@ def load_config():
             "save_transcripts": config.getboolean(
                 'GEMINI_LIVE', 'save_transcripts', fallback=True
             ),
+            "stream_output_transcript": config.getboolean(
+                'GEMINI_LIVE', 'stream_output_transcript', fallback=True
+            ),
             "mute_input_during_playback": config.getboolean(
                 'GEMINI_LIVE', 'mute_input_during_playback', fallback=True
             ),

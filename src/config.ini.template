@@ -22,10 +22,12 @@ native_google_search = false
 traditional_tool_fallback = true
 # Allows Live to hand current facts, web search, and other TARS tools to process_completion().
 # This adds the latency and possible API cost of the configured traditional LLM for delegated turns.
-home_assistant_tool = true
 # Exposes the existing Home Assistant command path when HOME_ASSISTANT.enabled = True.
-save_transcripts = true
+home_assistant_tool = true
 # Store completed Live turns in the existing TARS short/long-term memory path.
+save_transcripts = true
+# Show Gemini's output transcript while its audio response is still playing.
+stream_output_transcript = true
 mute_input_during_playback = true
 # true = speaker-safe half duplex; blocks Gemini's own voice from re-entering the mic.
 # false = full duplex/barge-in, recommended only with headphones or hardware echo cancellation.

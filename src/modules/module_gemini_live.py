@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from modules.module_messageQue import queue_message
+from modules.module_messageQue import queue_live_update, queue_message
 
 
 INPUT_SAMPLE_RATE = 16000
@@ -108,6 +108,8 @@ class GeminiLiveSession:
         self._mute_input_until = 0.0
         self._input_transcript = ""
         self._output_transcript = ""
+        self._output_stream_started = False
+        self._turn_index = 0
         self._delegated_current_turn = False
         self._end_after_turn = False
 
@@ -459,6 +461,7 @@ class GeminiLiveSession:
 
         if getattr(server_content, "interrupted", False):
             self._playback.clear()
+            self._finish_output_stream()
             self._output_transcript = ""
 
         found_part_audio = False
@@ -486,6 +489,15 @@ class GeminiLiveSession:
             self._output_transcript = _merge_transcript(
                 self._output_transcript, getattr(output_tx, "text", "")
             )
+            if (
+                self._output_transcript
+                and self.live_config.get("stream_output_transcript", True)
+            ):
+                queue_live_update(
+                    self._output_stream_key(),
+                    f"TARS: {self._output_transcript}",
+                )
+                self._output_stream_started = True
 
         if getattr(server_content, "turn_complete", False):
             await self._finish_turn()
@@ -539,10 +551,13 @@ class GeminiLiveSession:
         user_text = self._input_transcript.strip()
         assistant_text = self._output_transcript.strip()
         delegated = self._delegated_current_turn
+        streamed_output = self._output_stream_started
 
+        if assistant_text and streamed_output:
+            self._finish_output_stream()
         if user_text:
             queue_message(f"USER: {user_text}")
-        if assistant_text:
+        if assistant_text and not streamed_output:
             queue_message(f"TARS: {assistant_text}")
         if user_text and assistant_text and self.turn_callback:
             await asyncio.to_thread(
@@ -552,6 +567,20 @@ class GeminiLiveSession:
         self._input_transcript = ""
         self._output_transcript = ""
         self._delegated_current_turn = False
+        self._turn_index += 1
+
+    def _output_stream_key(self) -> str:
+        return f"gemini-live-output-{self._turn_index}"
+
+    def _finish_output_stream(self) -> None:
+        if not self._output_stream_started:
+            return
+        queue_live_update(
+            self._output_stream_key(),
+            f"TARS: {self._output_transcript}",
+            final=True,
+        )
+        self._output_stream_started = False
 
     async def _monitor_external_stop(self) -> None:
         while not self._stop.is_set():

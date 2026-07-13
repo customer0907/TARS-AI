@@ -25,11 +25,54 @@ def format_console_line(message: str) -> str:
 
 def process_message_queue():
     """ Continuously process the message queue in order. """
+    live_key = None
+    live_width = 0
+    live_timestamp = None
+
     while True:
         item = message_queue.get()
 
         if item is None:  # Stop signal
+            if live_key is not None:
+                with output_lock:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
             break
+
+        if isinstance(item, tuple) and len(item) == 4 and item[0] == "__live_update__":
+            _, key, message, final = item
+            with output_lock:
+                if live_key is not None and live_key != key:
+                    sys.stdout.write("\n")
+                    live_width = 0
+                    live_timestamp = None
+                display = format_console_line(message)
+                timestamp_match = _TIMESTAMP_PREFIX.match(display)
+                if live_key == key and live_timestamp and timestamp_match:
+                    display = live_timestamp + display[timestamp_match.end():]
+                elif timestamp_match:
+                    live_timestamp = timestamp_match.group(0)
+                padding = " " * max(0, live_width - len(display))
+                sys.stdout.write(f"\r{display}{padding}")
+                if final:
+                    sys.stdout.write("\n")
+                    live_key = None
+                    live_width = 0
+                    live_timestamp = None
+                else:
+                    live_key = key
+                    live_width = len(display)
+                sys.stdout.flush()
+            message_queue.task_done()
+            continue
+
+        if live_key is not None:
+            with output_lock:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            live_key = None
+            live_width = 0
+            live_timestamp = None
 
         # Handle cases where stream_text is missing (default to False)
         if isinstance(item, tuple) and len(item) == 2:
@@ -77,6 +120,12 @@ def queue_message(message, stream=False):
     """
     if message and message.strip():
         message_queue.put((format_console_line(message.strip()), stream))  # 🔹 No lock needed here
+
+
+def queue_live_update(key, message, final=False):
+    """Replace one console line as a partial transcript grows."""
+    if message and message.strip():
+        message_queue.put(("__live_update__", key, message.strip(), final))
 
 def stop_message_processing():
     """ Stops the message processing thread safely. """
