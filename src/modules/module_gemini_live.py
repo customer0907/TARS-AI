@@ -135,9 +135,14 @@ class GeminiLiveSession:
         character_card = getattr(self.character_manager, "character_card", "") or ""
         if character_card.strip():
             parts.append(f"### Character\n{character_card.strip()}")
-        if llm_cfg.get("systemprompt"):
+        # Korean sessions take systemprompt_ko; instructionprompt stays English-only
+        # because its _ko variant is a per-turn directive, not a session rule.
+        system_key = "systemprompt_ko" if language == "ko" else "systemprompt"
+        if llm_cfg.get(system_key):
+            parts.append(llm_cfg[system_key])
+        elif llm_cfg.get("systemprompt"):
             parts.append(llm_cfg["systemprompt"])
-        if llm_cfg.get("instructionprompt"):
+        if language != "ko" and llm_cfg.get("instructionprompt"):
             parts.append(llm_cfg["instructionprompt"])
 
         recent_context = ""
