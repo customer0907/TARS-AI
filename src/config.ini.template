@@ -133,7 +133,7 @@ character_card_path = character/TARS/TARS.json
 character_card_path_ko = character/TARS_KO/TARS_KO.json
 # ko stub JSON (char_name only). Persona rules live in systemprompt_ko / instructionprompt_ko.
 user_name = Joe
-user_name_ko = 창희
+user_name_ko = 토니
 # Name of the user interacting with the character
 user_details = Species: Human. Gender: Male.
 user_details_ko = 종족: 인간. 성별: 남성.

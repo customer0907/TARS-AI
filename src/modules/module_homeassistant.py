@@ -18,7 +18,7 @@ MIN_SCORE = 2
 
 # STT often mishears 불 → 둘/돌/물
 _LIGHT_WORD = r"(?:불|조명|전등|불들|라이트|둘|돌|물|lights?)"
-_FILLERS = r"(?:야|어|이|그|저|아|음+|흠+|근데|미안|규나야|타스야|창희야|헤이|hey)"
+_FILLERS = r"(?:야|어|이|그|저|아|음+|흠+|근데|미안|규나야|타스야|토니야|헤이|hey)"
 
 # Strong one-shot phrases (compact, spaces removed)
 _OFF_PHRASES = [
