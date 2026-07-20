@@ -73,10 +73,8 @@ def _brave_api_key():
     return os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
 
 
-def _google_cse_credentials():
-    api_key = os.getenv("GOOGLE_CSE_API_KEY", "").strip()
-    engine_id = os.getenv("GOOGLE_CSE_ENGINE_ID", "").strip()
-    return api_key, engine_id
+def _gemini_api_key():
+    return os.getenv("GEMINI_API_KEY", "").strip()
 
 
 def is_naver_search_available():
@@ -88,9 +86,8 @@ def is_brave_search_available():
     return bool(_brave_api_key())
 
 
-def is_google_cse_available():
-    api_key, engine_id = _google_cse_credentials()
-    return bool(api_key and engine_id)
+def is_google_search_available():
+    return bool(_gemini_api_key())
 
 # === Helper Functions ===
 # Silence logs to suppress unnecessary outputs
@@ -288,39 +285,56 @@ def search_brave_items(query, display=5):
     ]
 
 
-def search_google_cse_items(query, display=5):
-    api_key, engine_id = _google_cse_credentials()
-    if not (api_key and engine_id):
-        raise RuntimeError("Google CSE credentials are missing.")
+def search_google_items(query, display=5):
+    """
+    Google results via Gemini's native google_search grounding.
+    Titles/snippets/URLs come from the response's grounding metadata, so this
+    returns real source links rather than the model's prose.
+    """
+    api_key = _gemini_api_key()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is missing.")
 
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        "key": api_key,
-        "cx": engine_id,
-        "q": query,
-        "num": max(1, min(int(display), 10)),
-        "hl": "ko",
-        "gl": "kr",
-        "safe": "active",
-    }
+    from google import genai
+    from google.genai import types
 
-    queue_message(f"INFO: Searching Google CSE for: {query}")
-    response = requests.get(url, params=params, timeout=8)
-    if response.status_code == 429:
-        raise RuntimeError("Google CSE daily quota exceeded (free tier is 100 queries/day).")
-    response.raise_for_status()
-    raw_items = response.json().get("items", []) or []
-    queue_message(f"INFO: Google CSE returned {len(raw_items)} results")
-    return [
-        {
-            "provider": "google_cse",
-            "category": "web",
-            "title": _strip_html(item.get("title")),
-            "snippet": _strip_html(item.get("snippet")),
-            "url": item.get("link") or "",
-        }
-        for item in raw_items[:display]
-    ]
+    queue_message(f"INFO: Searching Google (Gemini grounding) for: {query}")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=query,
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        ),
+    )
+
+    items = []
+    for candidate in (response.candidates or []):
+        metadata = getattr(candidate, "grounding_metadata", None)
+        if not metadata:
+            continue
+        for chunk in (getattr(metadata, "grounding_chunks", None) or []):
+            web = getattr(chunk, "web", None)
+            if not web:
+                continue
+            items.append(
+                {
+                    "provider": "google",
+                    "category": "web",
+                    "title": _strip_html(getattr(web, "title", "")),
+                    "snippet": "",
+                    "url": getattr(web, "uri", "") or "",
+                }
+            )
+
+    # The grounded answer text is the most useful snippet Gemini gives us; attach
+    # it to the first source so the downstream extractor has something to read.
+    summary = (getattr(response, "text", "") or "").strip()
+    if items and summary:
+        items[0]["snippet"] = _strip_html(summary)
+
+    queue_message(f"INFO: Google grounding returned {len(items)} results")
+    return items[:display]
 
 
 def _naver_fallback_categories(category):
@@ -540,7 +554,19 @@ def search_combined(query, category="auto", display=5):
     items = []
     tried = []
 
+    # Google first: its results are preferred, and the dedupe pass below keeps the
+    # earliest occurrence of each URL. Naver/Brave still run and fill in behind it.
+    if is_google_search_available():
+        tried.append(f"google:web:{planned_query}")
+        try:
+            items.extend(search_google_items(planned_query, display=display))
+        except Exception as e:
+            queue_message(f"WARNING: Google search failed: {e}")
+    else:
+        queue_message("INFO: GEMINI_API_KEY missing; skipping Google search.")
+
     if is_naver_search_available():
+        naver_items_all = []
         for candidate in _naver_fallback_categories(resolved_category):
             tried.append(f"naver:{candidate}:{planned_query}")
             try:
@@ -548,9 +574,10 @@ def search_combined(query, category="auto", display=5):
             except Exception as e:
                 queue_message(f"WARNING: Naver {candidate} search failed: {e}")
                 naver_items = []
-            items.extend(_normalize_naver_item(item, candidate) for item in naver_items)
-            if items and candidate == resolved_category:
+            naver_items_all.extend(_normalize_naver_item(item, candidate) for item in naver_items)
+            if naver_items_all and candidate == resolved_category:
                 break
+        items.extend(naver_items_all)
     else:
         queue_message("INFO: Naver credentials missing; skipping Naver search.")
 
@@ -563,18 +590,16 @@ def search_combined(query, category="auto", display=5):
     else:
         queue_message("INFO: Brave Search API key missing; skipping Brave search.")
 
-    if is_google_cse_available():
-        tried.append(f"google_cse:web:{planned_query}")
-        try:
-            items.extend(search_google_cse_items(planned_query, display=display))
-        except Exception as e:
-            queue_message(f"WARNING: Google CSE search failed: {e}")
-    else:
-        queue_message("INFO: Google CSE credentials missing; skipping Google search.")
-
     if not items and planned_query != query:
+        if is_google_search_available():
+            tried.append(f"google:web:{query}")
+            try:
+                items.extend(search_google_items(query, display=display))
+            except Exception as e:
+                queue_message(f"WARNING: Google fallback search failed: {e}")
         if is_naver_search_available():
             fallback_category = _naver_category_for_query(query, category)
+            naver_items_all = []
             for candidate in _naver_fallback_categories(fallback_category):
                 tried.append(f"naver:{candidate}:{query}")
                 try:
@@ -582,21 +607,16 @@ def search_combined(query, category="auto", display=5):
                 except Exception as e:
                     queue_message(f"WARNING: Naver fallback {candidate} search failed: {e}")
                     naver_items = []
-                items.extend(_normalize_naver_item(item, candidate) for item in naver_items)
-                if items:
+                naver_items_all.extend(_normalize_naver_item(item, candidate) for item in naver_items)
+                if naver_items_all:
                     break
+            items.extend(naver_items_all)
         if is_brave_search_available():
             tried.append(f"brave:web:{query}")
             try:
                 items.extend(search_brave_items(query, display=display))
             except Exception as e:
                 queue_message(f"WARNING: Brave fallback search failed: {e}")
-        if is_google_cse_available():
-            tried.append(f"google_cse:web:{query}")
-            try:
-                items.extend(search_google_cse_items(query, display=display))
-            except Exception as e:
-                queue_message(f"WARNING: Google CSE fallback search failed: {e}")
 
     # Keep prompt size bounded and remove exact duplicate URLs/titles.
     deduped = []
@@ -688,7 +708,7 @@ def search_naver(query, category="auto", display=5):
 
 def search_web(query):
     """Single WebSearch tool entrypoint with planning, multi-provider search, and extraction."""
-    if is_naver_search_available() or is_brave_search_available() or is_google_cse_available():
+    if is_naver_search_available() or is_brave_search_available() or is_google_search_available():
         return search_combined(query, category="auto")
     queue_message("INFO: Search API credentials missing; falling back to Google search.")
     return search_google(query)
@@ -696,7 +716,7 @@ def search_web(query):
 
 def search_news(query):
     """News tool entrypoint with planning, multi-provider search, and extraction."""
-    if is_naver_search_available() or is_brave_search_available() or is_google_cse_available():
+    if is_naver_search_available() or is_brave_search_available() or is_google_search_available():
         return search_combined(query, category="news")
     queue_message("INFO: Search API credentials missing; falling back to Google News search.")
     return search_google_news(query)

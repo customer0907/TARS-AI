@@ -28,6 +28,25 @@ def process_message_queue():
     live_key = None
     live_width = 0
     live_timestamp = None
+    live_display = ""
+    # Cursor tricks (\r) only work on a real terminal; when stdout is piped or
+    # redirected they would leave one stale line per partial update.
+    live_capable = sys.stdout.isatty()
+
+    def write_live(display):
+        """Redraw the in-progress line, padding over whatever was longer before."""
+        nonlocal live_width
+        padding = " " * max(0, live_width - len(display))
+        sys.stdout.write(f"\r{display}{padding}")
+        live_width = len(display)
+
+    def end_live_line():
+        nonlocal live_key, live_width, live_timestamp, live_display
+        sys.stdout.write("\n")
+        live_key = None
+        live_width = 0
+        live_timestamp = None
+        live_display = ""
 
     while True:
         item = message_queue.get()
@@ -43,36 +62,33 @@ def process_message_queue():
             _, key, message, final = item
             with output_lock:
                 if live_key is not None and live_key != key:
-                    sys.stdout.write("\n")
-                    live_width = 0
-                    live_timestamp = None
+                    end_live_line()
                 display = format_console_line(message)
                 timestamp_match = _TIMESTAMP_PREFIX.match(display)
                 if live_key == key and live_timestamp and timestamp_match:
                     display = live_timestamp + display[timestamp_match.end():]
                 elif timestamp_match:
                     live_timestamp = timestamp_match.group(0)
-                padding = " " * max(0, live_width - len(display))
-                sys.stdout.write(f"\r{display}{padding}")
+
+                if not live_capable:
+                    # No in-place updates available; print the finished line only.
+                    if final:
+                        print(display, flush=True)
+                        live_key = None
+                        live_timestamp = None
+                        live_display = ""
+                    message_queue.task_done()
+                    continue
+
+                write_live(display)
                 if final:
-                    sys.stdout.write("\n")
-                    live_key = None
-                    live_width = 0
-                    live_timestamp = None
+                    end_live_line()
                 else:
                     live_key = key
-                    live_width = len(display)
+                    live_display = display
                 sys.stdout.flush()
             message_queue.task_done()
             continue
-
-        if live_key is not None:
-            with output_lock:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-            live_key = None
-            live_width = 0
-            live_timestamp = None
 
         # Handle cases where stream_text is missing (default to False)
         if isinstance(item, tuple) and len(item) == 2:
@@ -82,11 +98,25 @@ def process_message_queue():
             stream_text = False  # Default if not provided
 
         if stream_text:
+            # Character-by-character output owns the cursor, so close the live line first.
+            if live_key is not None:
+                with output_lock:
+                    end_live_line()
+                    sys.stdout.flush()
             # 🔹 Run text streaming in a **separate thread** to avoid blocking
             threading.Thread(target=stream_text_blocking, args=(message,), daemon=True).start()
         else:
             with output_lock:  # 🔹 Lock only while printing
-                print(message, flush=True)
+                if live_key is not None:
+                    # Print above the in-progress line, then redraw it underneath so the
+                    # partial transcript keeps growing in place instead of restarting.
+                    sys.stdout.write("\r" + " " * live_width + "\r")
+                    print(message, flush=True)
+                    live_width = 0
+                    write_live(live_display)
+                    sys.stdout.flush()
+                else:
+                    print(message, flush=True)
 
         message_queue.task_done()
 
