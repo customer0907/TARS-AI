@@ -3,6 +3,8 @@ import time
 import threading
 import queue
 import re
+import shutil
+import unicodedata
 from datetime import datetime
 
 # Queue for handling message processing
@@ -10,6 +12,28 @@ message_queue = queue.Queue()
 output_lock = threading.Lock()  # 🔹 Single lock for ALL stdout operations
 
 _TIMESTAMP_PREFIX = re.compile(r'^\[\d{2}:\d{2}:\d{2}\] ')
+
+
+def _char_width(char: str) -> int:
+    """Hangul/CJK glyphs occupy two terminal columns."""
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+
+
+def display_width(text: str) -> int:
+    return sum(_char_width(char) for char in text)
+
+
+def truncate_to_width(text: str, limit: int):
+    """Cut text to fit one terminal row; \\r only rewinds the last wrapped row."""
+    kept = []
+    width = 0
+    for char in text:
+        char_width = _char_width(char)
+        if width + char_width > limit:
+            break
+        kept.append(char)
+        width += char_width
+    return "".join(kept), width
 
 
 def format_console_line(message: str) -> str:
@@ -36,9 +60,13 @@ def process_message_queue():
     def write_live(display):
         """Redraw the in-progress line, padding over whatever was longer before."""
         nonlocal live_width
-        padding = " " * max(0, live_width - len(display))
-        sys.stdout.write(f"\r{display}{padding}")
-        live_width = len(display)
+        columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+        # Stay one column short of the edge so the row never wraps; a wrapped row
+        # cannot be rewound by \r and would leave its overflow on screen forever.
+        clipped, width = truncate_to_width(display, max(1, columns - 1))
+        padding = " " * max(0, live_width - width)
+        sys.stdout.write(f"\r{clipped}{padding}")
+        live_width = width
 
     def end_live_line():
         nonlocal live_key, live_width, live_timestamp, live_display
@@ -80,10 +108,16 @@ def process_message_queue():
                     message_queue.task_done()
                     continue
 
-                write_live(display)
                 if final:
-                    end_live_line()
+                    # Completed turns print in full and may wrap freely.
+                    sys.stdout.write("\r" + " " * live_width + "\r")
+                    print(display, flush=True)
+                    live_key = None
+                    live_width = 0
+                    live_timestamp = None
+                    live_display = ""
                 else:
+                    write_live(display)
                     live_key = key
                     live_display = display
                 sys.stdout.flush()
