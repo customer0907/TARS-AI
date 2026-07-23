@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TARS Live — Phase 0</title>
+    <script src="{{ url_for('static', filename='js/socket.io.js') }}"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto;
+               padding: 0 1rem; background: #111; color: #eee; }
+        h1 { font-size: 1.2rem; }
+        .row { margin: 0.75rem 0; }
+        button { font-size: 1rem; padding: 0.5rem 1.1rem; margin-right: 0.5rem;
+                 border: 0; border-radius: 6px; cursor: pointer; }
+        #startBtn { background: #2e7d32; color: #fff; }
+        #stopBtn  { background: #b71c1c; color: #fff; }
+        button:disabled { opacity: 0.4; cursor: default; }
+        #status { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px;
+                  background: #333; font-family: monospace; }
+        label { margin-right: 1rem; font-size: 0.9rem; }
+        #log { background: #000; border: 1px solid #333; border-radius: 6px;
+               padding: 0.6rem; height: 320px; overflow-y: auto; white-space: pre-wrap;
+               font-family: monospace; font-size: 0.8rem; line-height: 1.4; }
+        .hint { color: #888; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <h1>TARS Live — Phase 0 (full-duplex 검증)</h1>
+
+    <div class="row">
+        상태: <span id="status">idle</span>
+    </div>
+
+    <div class="row">
+        <button id="startBtn">▶ 시작</button>
+        <button id="stopBtn" disabled>■ 정지</button>
+    </div>
+
+    <div class="row">
+        <label><input type="checkbox" id="aecChk" checked> echoCancellation</label>
+        <label><input type="checkbox" id="nsChk" checked> noiseSuppression</label>
+        <label><input type="checkbox" id="agcChk" checked> autoGainControl</label>
+    </div>
+    <div class="row hint">
+        검증법: 스피커 볼륨을 올린 상태에서 켜고 대화 → 에코 없이 대화되면 성공.<br>
+        비교: echoCancellation 체크를 끄고 다시 시작하면 에코가 돌아와야 정상(대조군).<br>
+        ⚠ 마이크 권한은 <b>localhost</b> 또는 <b>https</b>에서만 허용됩니다.
+    </div>
+
+    <div class="row">
+        <div id="log"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/live_client.js') }}"></script>
+</body>
+</html>
