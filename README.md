@@ -2,7 +2,7 @@
 
 > 오픈소스 TARS-AI 기반에 한국어 음성 대화, Gemini Live, Home Assistant 스마트홈 제어를 더한 Raspberry Pi 5 보행 로봇
 
-<!-- TODO(사용자 확인): 대표 사진 docs/images/hero.jpg (실물 로봇) -->
+<img src="docs/images/hero.jpg" width="420" alt="3D 프린팅으로 제작한 TARS 로봇: Raspberry Pi 5와 3.5인치 LCD 탑재" />
 
 | 기간 | 인원 | 역할 | 상태 |
 |---|---|---|---|
@@ -28,11 +28,15 @@
 - Android 폰 브리지 — 밖에서도 폰으로 집 TARS와 대화, 폰 안에서 한국어 웨이크워드 인식(Vosk) → [phone-app/](phone-app/)
 - 알람 데몬 — 음성 앱과 분리된 상주 서비스, 재부팅 후 복원, Gemini TTS로 말로 깨우기 → [alarm-daemon/](alarm-daemon/)
 - 다중 TTS — ElevenLabs v3(감정 태그), Fish Audio, Piper
-- 4족 보행 — PCA9685 + MG996R 서보, 로컬 서보 제어
+- 2족 보행 — 양팔을 앞으로 뻗어 땅을 짚고 몸통이 관성으로 따라오는 TARS 고유 구조, PCA9685 + MG996R 서보
 
-| 하드웨어 | 핀맵 |
+| 음성 → Home Assistant 조명 제어 | 2족 보행 ("Step forward") |
 |---|---|
-| <!-- TODO(사용자 확인): docs/images/build.jpg --> 사진 준비 중 | ![Raspberry Pi 5 GPIO](docs/images/rpi5_gpio_pinout.png) |
+| <img src="docs/images/demo.gif" width="360" alt="음성 명령으로 방 조명을 끄고 켜는 시연" /> | <img src="docs/images/walk.gif" width="360" alt="양팔로 땅을 짚고 몸통이 따라오는 보행 동작" /> |
+
+| 내부 구조 | 핀맵 |
+|---|---|
+| <img src="docs/images/build.jpg" width="360" alt="덮개를 연 내부: 다리 서보 2개, 중앙 구동 링키지, XT60·Wago 전원 분배" /> | <img src="docs/images/rpi5_gpio_pinout.png" width="360" alt="Raspberry Pi 5 GPIO 핀맵" /> |
 
 ## 3. 아키텍처
 ```mermaid
