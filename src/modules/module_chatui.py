@@ -29,6 +29,7 @@ import threading, time, math, random, io
 from PIL import Image
 import logging
 import json
+import queue
 import asyncio
 
 from flask import (
@@ -56,6 +57,7 @@ from modules.module_vision import get_image_caption_from_base64
 from modules.module_tts import generate_tts_audio
 from modules.module_llm import detect_emotion
 from modules.module_messageQue import queue_message
+from modules.module_gemini_live_web import WebGeminiLiveBridge
 
 # Suppress Flask logs
 log = logging.getLogger('werkzeug')
@@ -81,11 +83,36 @@ swayamount = 1   # You can change this value from 1 to 10.
 sprite = 'tars'
 emotion = 'neutral'
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 character_path = CONFIG['CHAR']['character_card_path']
-character_name = os.path.splitext(os.path.basename(character_path))[0]  # Extract filename without extension
- 
-CHARACTER_DIR = os.path.join(BASE_DIR, "character", character_name, "images", emotion)
+character_name = os.path.splitext(os.path.basename(character_path))[0]
+
+
+def _resolve_sprite_dir(character_name, emotion_name, sprite_name):
+    """
+    Face sprite PNGs live under character/<name>/images/<emotion>/.
+    Personas such as TARS_KO may not ship their own UI assets; fall back to TARS.
+    """
+    probe = f"{sprite_name}_nottalking_eyes_open.png"
+    primary = os.path.join(BASE_DIR, "character", character_name, "images", emotion_name)
+    if os.path.isfile(os.path.join(primary, probe)):
+        return primary
+
+    fallback_char = "TARS"
+    fallback = os.path.join(BASE_DIR, "character", fallback_char, "images", emotion_name)
+    if os.path.isfile(os.path.join(fallback, probe)):
+        queue_message(
+            f"INFO: Chat UI sprites missing for {character_name}; using {fallback_char} images."
+        )
+        return fallback
+
+    raise FileNotFoundError(
+        f"Chat UI sprite not found: {os.path.join(primary, probe)} "
+        f"(fallback {fallback} also missing)"
+    )
+
+
+CHARACTER_DIR = _resolve_sprite_dir(character_name, emotion, sprite)
 
 # Load images using the absolute path
 img_nottalking_open = Image.open(os.path.join(CHARACTER_DIR, f"{sprite}_nottalking_eyes_open.png")).convert("RGBA")
@@ -212,6 +239,97 @@ flask_app = Flask(__name__, template_folder=CHARACTER_DIR, static_url_path='/sta
 CORS(flask_app)
 socketio = SocketIO(flask_app, cors_allowed_origins="*", logger=False, engineio_logger=False)
 
+# ===== Phase 0: browser-audio Gemini Live bridge =====
+# Browser mic (WebRTC AEC) <-> this server <-> Gemini Live, to validate real
+# full duplex over one shared speaker/mic. Audio crosses the thread boundary via
+# a plain queue; a green background task drains it so socketio.emit always runs
+# in eventlet context (this app does not call eventlet.monkey_patch()).
+_live_output_queue = queue.Queue(maxsize=400)
+_live_bridge = None
+_live_emitter_running = False
+
+
+def _live_enqueue(kind, payload):
+    """Called from the bridge's own thread — must stay non-blocking."""
+    try:
+        _live_output_queue.put_nowait((kind, payload))
+    except queue.Full:
+        try:
+            _live_output_queue.get_nowait()
+            _live_output_queue.put_nowait((kind, payload))
+        except queue.Empty:
+            pass
+
+
+def _live_on_output_audio(data):
+    _live_enqueue('live_audio_out', data)
+
+
+def _live_on_event(kind, text=""):
+    _live_enqueue('live_event', {'kind': kind, 'text': text})
+
+
+def _live_drain_output_queue():
+    while True:
+        try:
+            _live_output_queue.get_nowait()
+        except queue.Empty:
+            break
+
+
+def _live_start_emitter():
+    """Green background task: drain the audio/event queue into socketio.emit."""
+    global _live_emitter_running
+    if _live_emitter_running:
+        return
+    _live_emitter_running = True
+
+    def _emit_loop():
+        global _live_emitter_running
+        try:
+            while _live_emitter_running:
+                try:
+                    kind, payload = _live_output_queue.get_nowait()
+                except queue.Empty:
+                    socketio.sleep(0.005)
+                    continue
+                socketio.emit(kind, payload)
+        finally:
+            _live_emitter_running = False
+
+    socketio.start_background_task(_emit_loop)
+
+
+@socketio.on('live_start')
+def handle_live_start():
+    global _live_bridge
+    _live_start_emitter()
+    if _live_bridge is None:
+        _live_bridge = WebGeminiLiveBridge(
+            CONFIG,
+            on_output_audio=_live_on_output_audio,
+            on_event=_live_on_event,
+        )
+    if not _live_bridge.is_running():
+        _live_drain_output_queue()  # drop stale audio from a previous session
+        _live_bridge.start()
+    socketio.emit('live_event', {'kind': 'status', 'text': 'starting'})
+
+
+@socketio.on('live_audio')
+def handle_live_audio(data):
+    # 16 kHz PCM16 mono from the browser mic.
+    if _live_bridge is not None and isinstance(data, (bytes, bytearray)):
+        _live_bridge.feed_input_audio(bytes(data))
+
+
+@socketio.on('live_stop')
+def handle_live_stop():
+    if _live_bridge is not None:
+        _live_bridge.stop()
+    socketio.emit('live_event', {'kind': 'status', 'text': 'stopping'})
+
+
 def send_heartbeat():
     while True:
         socketio.sleep(10)  # Send heartbeat every 10 seconds
@@ -251,6 +369,10 @@ def index():
 @flask_app.route('/holo')
 def holo():
     return render_template('holo.html')
+
+@flask_app.route('/live')
+def live():
+    return render_template('live.html')
 
 @flask_app.route('/get_ip')
 def get_config_variable():

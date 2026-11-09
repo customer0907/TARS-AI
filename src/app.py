@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 app.py
 
@@ -16,6 +17,9 @@ Run this script directly to start the application.
 import os
 import sys
 import threading
+import time
+import numpy as np
+import sounddevice as sd
 from datetime import datetime
 
 # === Custom Modules ===
@@ -25,10 +29,22 @@ from modules.module_memory import MemoryManager
 from modules.module_stt import STTManager
 from modules.module_tts import update_tts_settings
 from modules.module_btcontroller import *
-from modules.module_main import initialize_managers, wake_word_callback, utterance_callback, post_utterance_callback, start_bt_controller_thread, start_discord_bot, process_discord_message_callback
+from modules.module_main import (
+    gemini_live_session_callback,
+    initialize_managers,
+    post_utterance_callback,
+    process_discord_message_callback,
+    start_bt_controller_thread,
+    start_discord_bot,
+    utterance_callback,
+    wake_word_callback,
+)
 from modules.module_vision import initialize_blip
 from modules.module_llm import initialize_manager_llm
 import modules.module_chatui
+from modules.module_messageQue import queue_message
+from modules.module_diag_log import init_diag_log, get_diag_log_path
+from modules.module_mqtt_listener import set_stt_manager, start_mqtt_listener
 
 # === Constants and Globals ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,11 +59,7 @@ def init_app():
     """
     Performs initial setup for the application
     """
-    
     queue_message(f"LOAD: Script running from: {BASE_DIR}")
-    #queue_message(f"DEBUG: init_app() called")
-    
-    # Load the configuration
     CONFIG = load_config()
     if CONFIG['TTS']['ttsoption'] == 'xttsv2':
         update_tts_settings(CONFIG['TTS']['ttsurl'])
@@ -64,6 +76,8 @@ def start_discord_in_thread():
 if __name__ == "__main__":
     # Perform initial setup
     init_app()
+    diag_path = init_diag_log(BASE_DIR)
+    queue_message(f"LOAD: Diagnostic log: {diag_path}")
 
     # Create a shutdown event for global threads
     shutdown_event = threading.Event()
@@ -77,19 +91,33 @@ if __name__ == "__main__":
     stt_manager.set_wake_word_callback(wake_word_callback)
     stt_manager.set_utterance_callback(utterance_callback)
     stt_manager.set_post_utterance_callback(post_utterance_callback)
+    stt_manager.set_live_session_callback(gemini_live_session_callback)
 
-    #DISCORD Callback
+    # DISCORD Callback
     if CONFIG['DISCORD']['enabled'] == 'True':
         start_discord_in_thread()
 
     # Pass managers to main module
     initialize_managers(memory_manager, char_manager, stt_manager)
     initialize_manager_llm(memory_manager, char_manager)
+    set_stt_manager(stt_manager)
+
+    mqtt_thread = None
+    if CONFIG['MQTT']['enabled'] == 'True':
+        mqtt_thread = threading.Thread(
+            target=start_mqtt_listener,
+            args=(shutdown_event,),
+            name="MQTTListenerThread",
+            daemon=True,
+        )
+        mqtt_thread.start()
 
     # Start necessary threads
     if CONFIG['CONTROLS']['enabled'] == 'True':
         bt_controller_thread = threading.Thread(target=start_bt_controller_thread, name="BTControllerThread", daemon=True)
         bt_controller_thread.start()
+    else:
+        bt_controller_thread = None
 
     # Create a thread for the Flask app
     if CONFIG['CHATUI']['enabled'] == "True":
@@ -100,21 +128,23 @@ if __name__ == "__main__":
     # Initilize BLIP to speed up initial image capture
     if CONFIG['VISION']['server_hosted'] != "True":
         initialize_blip()
-    
+
     try:
         queue_message(f"LOAD: TARS-AI v1.03a running.")
-        # Start the STT thread
+        queue_message(
+            f"LOAD: Voice pipeline: {CONFIG['VOICE_PIPELINE']['mode']}"
+        )
         stt_manager.start()
 
         while not shutdown_event.is_set():
-            time.sleep(0.1) # Sleep to reduce CPU usage
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
         queue_message(f"INFO: Stopping all threads and shutting down executor...")
-        shutdown_event.set()  # Signal global threads to shutdown
-        # executor.shutdown(wait=True)
+        shutdown_event.set()
 
     finally:
         stt_manager.stop()
-        bt_controller_thread.join()
+        if bt_controller_thread:
+            bt_controller_thread.join()
         queue_message(f"INFO: All threads and executor stopped gracefully.")

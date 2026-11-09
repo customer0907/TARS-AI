@@ -1,0 +1,11 @@
+# Played immediately after wake word (no LLM). One phrase per line.
+Yes? What do you need?
+Ready and listening.
+At your service.
+Go ahead.
+What can I do for you?
+Listening. What's up?
+Here. What do you require?
+Yes? I'm here.
+Standing by.
+Online and awaiting your command.

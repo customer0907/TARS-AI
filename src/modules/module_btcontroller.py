@@ -64,6 +64,8 @@ minusBtn = 49
 plusBtn = 24
 
 global gamepad_path
+gamepad_path = None
+_controller_missing_logged = False
 toggle = True
 posevar = False
 
@@ -75,17 +77,25 @@ SECRET_CODE = [
 input_sequence = []
 
 def find_controller(controller_name):
-    global gamepad_path
+    global gamepad_path, _controller_missing_logged
     """
     Search for a controller by its name.
     """
     devices = [InputDevice(path) for path in list_devices()]
     for device in devices:
         if controller_name.lower() in device.name.lower():
-            queue_message(f"LOAD: Controller found: {device.name} at {device.path}")
+            if _controller_missing_logged:
+                queue_message(f"LOAD: Controller connected: {device.name}")
+            else:
+                queue_message(f"LOAD: Controller found: {device.name} at {device.path}")
+            _controller_missing_logged = False
             gamepad_path = device.path
             return device
-    queue_message(f"LOAD: {controller_name} Not found, Searching...")
+    if not _controller_missing_logged:
+        queue_message(
+            f"LOAD: {controller_name} not found; BT controls idle until connected."
+        )
+        _controller_missing_logged = True
     return None
 
 def check_secret_code(button_name):
@@ -108,9 +118,11 @@ def check_secret_code(button_name):
 def stepForward():
     queue_message("MOVE: FWD")
     height_neutral_to_up()
-    torso_neutral_to_forwards()
-    torso_bump()
-    torso_return()
+    #torso_neutral_to_backwards()
+    #torso_neutral_to_forwards()
+    #torso_bump()
+    #torso_return()
+    #torso_return2()
 
 def turnRight():
     queue_message("MOVE: TurnRight")
@@ -324,15 +336,19 @@ def start_controls():
     """
     Listen to gamepad events and execute actions based on button presses/releases and analog movements.
     """
-    # Retry loop for detecting the gamepad
+    global gamepad_path
     gamepad = None
     while gamepad is None:
+        if not gamepad_path:
+            if not find_controller(controller_name):
+                time.sleep(5)
+                continue
         try:
-            # Try to connect to the gamepad
             gamepad = evdev.InputDevice(gamepad_path)
             queue_message(f"LOAD: {gamepad.name} connected.")
-        except FileNotFoundError:
-            time.sleep(5)  # Wait before retrying
+        except (FileNotFoundError, OSError):
+            gamepad_path = None
+            time.sleep(5)
 
     # Define mappings for button events with actions
     button_map = {
@@ -440,8 +456,6 @@ def start_controls():
 
     # Clean up
     gamepad.close()
-
-device = find_controller(controller_name)
 
 #Delete this is for testing
 if __name__ == "__main__":

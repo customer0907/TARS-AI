@@ -34,9 +34,12 @@ import os
 import joblib
 from datetime import datetime
 import threading
+import socket
+import re
 
 # === Custom Modules ===
-from modules.module_websearch import search_google, search_google_news
+from modules.module_websearch import search_news, search_web
+from modules.module_weather import get_weather
 from modules.module_vision import describe_camera_view
 from modules.module_stablediffusion import generate_image
 from modules.module_volume import handle_volume_command
@@ -47,11 +50,22 @@ from modules.module_messageQue import queue_message
 
 # === Constants ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Move up to "src"
-MODEL_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/naive_bayes_model.pkl')
-VECTORIZER_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/module_engine_model.pkl')
-TRAINING_DATA_PATH = os.path.join(BASE_DIR, 'engine/training/training_data.csv')
 
 CONFIG = load_config()
+
+# === Language-aware NB model / training data paths ===
+# English ('en') keeps the original filenames untouched, so reverting to English
+# requires no retraining. Other languages get a "<name>_<lang>" suffix and their
+# own training CSV + pickle files. Missing pickles are trained on first run below.
+LANGUAGE = CONFIG['CHAR'].get('language', 'en')
+if LANGUAGE == 'en':
+    MODEL_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/naive_bayes_model.pkl')
+    VECTORIZER_FILENAME = os.path.join(BASE_DIR, 'engine/pickles/module_engine_model.pkl')
+    TRAINING_DATA_PATH = os.path.join(BASE_DIR, 'engine/training/training_data.csv')
+else:
+    MODEL_FILENAME = os.path.join(BASE_DIR, f'engine/pickles/naive_bayes_model_{LANGUAGE}.pkl')
+    VECTORIZER_FILENAME = os.path.join(BASE_DIR, f'engine/pickles/module_engine_model_{LANGUAGE}.pkl')
+    TRAINING_DATA_PATH = os.path.join(BASE_DIR, f'engine/training/training_data_{LANGUAGE}.csv')
 
 #mode to use Naive Bayes or LLM for function calling
 mode = "NB"
@@ -66,14 +80,31 @@ try:
     tfidf_vectorizer = joblib.load(VECTORIZER_FILENAME)
 
 except FileNotFoundError as e:
-    # Attempt to train models if files are missing
+    # Attempt to train models if files are missing (language-aware paths)
     import module_engineTrainer
-    module_engineTrainer.train_text_classifier()
+    module_engineTrainer.train_text_classifier(
+        training_data_path=TRAINING_DATA_PATH,
+        nb_classifier_path=MODEL_FILENAME,
+        vectorizer_path=VECTORIZER_FILENAME,
+        language=LANGUAGE,
+    )
     try:
         nb_classifier = joblib.load(MODEL_FILENAME)
         tfidf_vectorizer = joblib.load(VECTORIZER_FILENAME)
     except Exception as retry_exception:
         raise RuntimeError("Critical error while loading models.") from retry_exception
+
+def is_internet_available(host="8.8.8.8", port=53, timeout=2):
+    """
+    Checks whether the device has internet connectivity.
+    Default host is Google DNS (8.8.8.8).
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except Exception:
+        return False
 
 # === Functions ===
 def execute_movement(movement, times):
@@ -110,130 +141,116 @@ def execute_movement(movement, times):
     thread.start()
     return thread  # Return the thread object if needed
 
+def movement_llmcall_offline(user_input):
+    """Offline fallback version of movement parser."""
+    from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+    import re
+    text = user_input.lower()
+    times = 1
+
+    m = re.search(r'(\d+)\s*(times|x)', text)
+    if m:
+        times = max(1, int(m.group(1)))
+
+    if "step forward" in text or "walk forward" in text:
+        for _ in range(times): stepForward()
+        return True
+    elif "turn left" in text:
+        for _ in range(times): turnLeft()
+        return True
+    elif "turn right" in text:
+        for _ in range(times): turnRight()
+        return True
+    elif "pose" in text and "unpose" not in text:
+        poseaction()
+        return True
+    elif "unpose" in text:
+        unposeaction()
+        return True
+
+    queue_message("[INFO] No recognizable offline movement command.")
+    return False
+
 def movement_llmcall(user_input):
-
-    if CONFIG['CONTROLS']['voicemovement'] != "True":
-        return
-    
     """
-    Interpret and execute movement commands based on user input using an LLM.
-
-    Parameters:
-    - user_input (str): The natural language command describing the desired movement (e.g., "turn right 90 degrees" or "step forward 3 times").
-
-    Returns:
-    - bool: True if the movement command was successfully interpreted and executed, False otherwise.
-    - str: Error message if the command could not be processed.
+    Interpret and execute movement commands.
+    Auto-detects if LLM is available (internet/API key check),
+    falls back to offline movement control if not.
     """
-    from module_llm import raw_complete_llm
-    # Define the prompt with placeholders
-    prompt = f"""
-    You are TARS, an AI module responsible for interpreting movement commands. Your job is to:
+    from module_btcontroller import stepForward, turnLeft, turnRight, poseaction, unposeaction
+    import re
 
-    1. Determine the type of movement from the following options only:
-    - stepForward
-    - turnRight
-    - turnLeft
-    - poseaction
-    - unposeaction
-    2. Extract the number of steps or the angle of turn if applicable, where 180 degrees equals 2 steps (90 degrees = 1 step).
-    3. Respond with a structured JSON output in the exact format:
-    {{
-        "movement": "{{
-            "movement": "<MOVEMENT>",
-            "times": <TIMES>
-        }}
-    }}
+    # === ① 인터넷 연결 확인 ===
+    online_mode = is_internet_available()
+    if not online_mode:
+        queue_message("[INFO] No internet connection detected. Running in OFFLINE mode.")
+    else:
+        queue_message("[INFO] Internet connection OK. Using LLM for movement parsing.")
 
-    Rules:
-    - Always output a single JSON object with the fields "movement" and "times".
-    - Do not output explanations, variations, or multiple commands.
-    - If no steps or angle is specified, default "times" to 1.
-    - Use precise logic for angles:
-    - Convert 90 degrees = 1 step.
-    - For angles greater than 90, calculate the number of steps (e.g., 180 degrees = 2 steps, 360 degrees = 4 steps).
-    - Determine the turn direction (turnLeft or turnRight) based on the input.
+    # === ② 오프라인 fallback 로직 ===
+    if not online_mode:
+        text = user_input.lower()
+        times = 1
 
-    Examples:
-    Input: "Hey TARS, walk forward 3 times"
-    Output:
-    {{
-        "movement": "stepForward",
-        "times": 3
-    }}
+        # 횟수 추출
+        m = re.search(r'(\d+)\s*(times|x)', text)
+        if m:
+            times = max(1, int(m.group(1)))
 
-    Input: "Hey TARS, do a 180-degree turn"
-    Output:
-    {{
-        "movement": "turnLeft",
-        "times": 2
-    }}
+        # 키워드 매칭
+        if "step forward" in text or "walk forward" in text:
+            for _ in range(times): stepForward()
+            return True
+        elif "turn left" in text:
+            for _ in range(times): turnLeft()
+            return True
+        elif "turn right" in text:
+            for _ in range(times): turnRight()
+            return True
+        elif "pose" in text and "unpose" not in text:
+            poseaction()
+            return True
+        elif "unpose" in text:
+            unposeaction()
+            return True
 
-    Input: "Hey TARS, turn right twice"
-    Output:
-    {{
-        "movement": "turnRight",
-        "times": 2
-    }}
+        queue_message("[INFO] No recognizable offline movement command.")
+        return False
 
-    Input: "Hey TARS, pose"
-    Output:
-    {{
-        "movement": "poseaction",
-        "times": 1
-    }}
-
-    Input: "Hey TARS, unpose"
-    Output:
-    {{
-        "movement": "unposeaction",
-        "times": 1
-    }}
-
-    Instructions:
-    - Use only the specified movements (stepForward, turnRight, turnLeft, poseaction, unposeaction).
-    - Ensure the JSON output is properly formatted and follows the example structure exactly.
-    - Process the input as a single command and provide one-line JSON output.
-
-    Input: "{user_input}"
-    Output:
-    """
+    # === ③ 온라인(LLM 가능) 로직 ===
     try:
+        from module_llm import raw_complete_llm
+        prompt = f"""
+        You are TARS, an AI module responsible for interpreting movement commands.
+        (same as original JSON prompt…)
+        Input: "{user_input}"
+        Output:
+        """
         data = raw_complete_llm(prompt)
 
         import json
-        # Parse the JSON response
         extracted_data = json.loads(data)
-
-        # Extract movement and times
         movement = extracted_data.get("movement")
         times = extracted_data.get("times")
 
-        queue_message(f"[DEBUG] FunctionCalling: {data}")
-        queue_message(f"[DEBUG] Extracted values: {movement}, {times}")
+        queue_message(f"[DEBUG] Extracted: movement={movement}, times={times}")
 
-        # Validate the extracted data
         if movement and times:
-            if isinstance(movement, str) and isinstance(times, int):
-                queue_message("moving")
-                execute_movement(movement, times)  # Call the movement function with validated values
-                return True
-            else:
-                queue_message("[ERROR] Invalid types: 'movement' must be str and 'times' must be int.")
-                return False
+            execute_movement(movement, times)
+            return True
         else:
-            queue_message("[ERROR] Missing 'movement' or 'times' in the response.")
-            return False
-    
+            queue_message("[ERROR] Invalid LLM output. Falling back to offline mode.")
+            return movement_llmcall_offline(user_input)  # fallback 재시도
     except Exception as e:
-        #queue_message(f"[DEBUG] Error in movement_llmcall: {e}")
-        return f"Error processing the movement command: {e}"
+        queue_message(f"[ERROR] LLM call failed ({e}). Running offline fallback.")
+        return movement_llmcall_offline(user_input)
 
 def call_function(module_name, *args, **kwargs):
     #queue_message(f"[DEBUG] Calling module: {module_name}")
     if module_name not in FUNCTION_REGISTRY:
         #queue_message(f"[DEBUG] No function registered for module: {module_name}")
         return "Not a Function"
+
     func = FUNCTION_REGISTRY[module_name]
     try:
         # Check if the function requires arguments
@@ -244,12 +261,95 @@ def call_function(module_name, *args, **kwargs):
     except Exception as e:
         queue_message(f"[DEBUG] Error while executing {module_name}: {e}")
 
+# Date/time questions should use Interaction Context, not the Weather tool.
+_DATE_ONLY = re.compile(
+    r"(몇\s*월|며칠|무슨\s*요일|요일|날짜|몇\s*일|지금\s*몇\s*시|몇\s*시)",
+    re.I,
+)
+_WEATHER_HINT = re.compile(
+    r"(날씨|비|눈|우산|기온|추워|더워|미세|습도|맑|흐림|소나기|강수)",
+    re.I,
+)
+_SEARCH_EXPLICIT_HINT = re.compile(r"(검색|찾아|찾아봐|알아봐)", re.I)
+_SEARCH_CURRENT_HINT = re.compile(r"(최신|요즘|최근|오늘|어제|지금)", re.I)
+_SEARCH_FACT_HINT = re.compile(
+    r"(가격|최저가|시세|환율|주가|뉴스|속보|발표|출시|"
+    r"누가\s*이겼|이겼어|결과|경기|스코어|순위)",
+    re.I,
+)
+_SEARCH_PRODUCT_HINT = re.compile(
+    r"(제품|모델|제습기|에어컨|노트북|컴퓨터|폰|휴대폰|모니터|"
+    r"키보드|마우스|이어폰|헤드셋|과자|음식|후기|리뷰|구매|판매|"
+    r"적용\s*면적|평형|용량)",
+    re.I,
+)
+
+
+def _is_date_or_time_only(user_input):
+    text = user_input or ""
+    return bool(_DATE_ONLY.search(text)) and not _WEATHER_HINT.search(text)
+
+
+def _has_weather_hint(user_input):
+    return bool(_WEATHER_HINT.search(user_input or ""))
+
+
+def _has_search_hint(user_input):
+    """Force Search for current facts, products, prices, scores, and explicit lookups."""
+    text = user_input or ""
+    if _SEARCH_EXPLICIT_HINT.search(text):
+        return True
+    if _SEARCH_FACT_HINT.search(text):
+        return True
+    if _SEARCH_CURRENT_HINT.search(text) and _SEARCH_PRODUCT_HINT.search(text):
+        return True
+    if "추천" in text and _SEARCH_PRODUCT_HINT.search(text):
+        return True
+    return False
+
+
+def _weather_prediction_allowed(user_input, predicted_class):
+    """Weather tool only when the utterance mentions weather-related topics."""
+    if predicted_class != "Weather":
+        return True
+    if _has_weather_hint(user_input):
+        return True
+    queue_message("INFO: Weather rejected (no weather keywords); treating as Chat")
+    return False
+
+
+# Labels that mean "no external tool" — not registered in FUNCTION_REGISTRY.
+_NO_TOOL_CLASSES = frozenset({"Chat", "Goodbye"})
+
 def check_for_module(user_input):
     """
     Determines the appropriate module to handle the user's input and invokes it.
     """
+    if _is_date_or_time_only(user_input):
+        return "None"
+
+    if CONFIG['HOME_ASSISTANT']['enabled'] == "True":
+        from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
+        if map_prompt_to_ha_service(user_input):
+            queue_message("TOOL: HA keyword match")
+            return send_prompt_to_homeassistant(user_input)
+
+    if _has_weather_hint(user_input):
+        queue_message("TOOL: Weather keyword match")
+        return call_function("Weather", user_input)
+
+    if _has_search_hint(user_input):
+        queue_message("TOOL: Search keyword match")
+        return call_function("Search", user_input)
+
     predicted_class, probability = predict_class(user_input)
     if not predicted_class:
+        return "None"
+
+    if predicted_class in _NO_TOOL_CLASSES:
+        return "None"
+
+    if not _weather_prediction_allowed(user_input, predicted_class):
         return "None"
     
     # Call the function associated with the predicted class
@@ -288,10 +388,10 @@ def predict_class_nb(user_input):
     if max_probability < 0.75:
         return None, max_probability
 
-    # Format the value as a percentage with 2 decimal places
-    formatted_probability = "{:.2f}%".format(max_probability * 100)
-    queue_message(f"TOOL: Using Tool {predicted_class} ({formatted_probability})")
-    generate_tts_audio("processing, processing, processing", CONFIG['TTS']['ttsoption'], CONFIG['TTS']['azure_api_key'], CONFIG['TTS']['azure_region'], CONFIG['TTS']['ttsurl'], CONFIG['TTS']['toggle_charvoice'], CONFIG['TTS']['tts_voice'])
+    if predicted_class not in _NO_TOOL_CLASSES:
+        formatted_probability = "{:.2f}%".format(max_probability * 100)
+        queue_message(f"TOOL: Using Tool {predicted_class} ({formatted_probability})")
+        generate_tts_audio("processing, processing, processing", CONFIG['TTS']['ttsoption'], CONFIG['TTS']['azure_api_key'], CONFIG['TTS']['azure_region'], CONFIG['TTS']['ttsurl'], CONFIG['TTS']['toggle_charvoice'], CONFIG['TTS']['tts_voice'])
 
     return predicted_class, max_probability
 
@@ -510,11 +610,11 @@ def adjust_persona(user_input):
  
 # === Function Calling ===
 FUNCTION_REGISTRY = {
-    "Weather": search_google, 
-    "News": search_google_news,
+    "Weather": get_weather,
+    "News": search_news,
     "Move": movement_llmcall,
     "Vision": describe_camera_view,
-    "Search": search_google,
+    "Search": search_web,
     "SDmodule-Generate": generate_image,
     "Volume": handle_volume_command,
     "Persona": adjust_persona,

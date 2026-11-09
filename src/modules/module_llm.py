@@ -16,6 +16,7 @@ from modules.module_config import load_config
 from modules.module_prompt import build_prompt
 
 from modules.module_messageQue import queue_message
+from modules.module_tts import polish_ko_reply
 
 # === Constants and Globals ===
 CONFIG = load_config()
@@ -47,13 +48,18 @@ def get_completion(user_prompt, istext=True):
         "Authorization": f"Bearer {CONFIG['LLM']['api_key']}"
     }
     llm_backend = CONFIG['LLM']['llm_backend']
-    url, data = _prepare_request_data(llm_backend, prompt)
+    url, data = _prepare_request_data(llm_backend, prompt, _build_system_prompt())
 
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
         bot_reply = _extract_text(response.json(), istext)
-        
+        if CONFIG['CHAR'].get('language') == 'ko' and bot_reply:
+            last_bot = ""
+            if memory_manager and memory_manager.session_turns:
+                last_bot = memory_manager.session_turns[-1][1]
+            bot_reply = polish_ko_reply(bot_reply, last_bot)
+
         llm_process(user_prompt, bot_reply)
         return bot_reply
     
@@ -61,37 +67,84 @@ def get_completion(user_prompt, istext=True):
         queue_message(f"ERROR: LLM request failed: {e}")
         return None
 
-def _prepare_request_data(llm_backend, prompt):
+def _build_system_prompt():
+    """
+    Build a real `system` role for Gemini/OpenAI in ko mode.
+
+    Burying persona rules inside the user turn ("System:" text) lets a small model
+    like gemini-2.5-flash-lite weight them weakly and fall back to "잘 모르겠어".
+    A genuine system role is followed far more strictly. ko card is a stub, so there
+    is no character-card conflict (the reason this was removed for English mode).
+    """
+    if CONFIG['CHAR'].get('language', 'en') != 'ko':
+        return None
+    char_name = character_manager.char_name if character_manager else ''
+    user_name = CONFIG['CHAR'].get('user_name', '')
+    parts = []
+    ko_block = getattr(character_manager, 'ko_persona_block', '') or ''
+    if ko_block.strip():
+        parts.append(ko_block)
+    tag_lib = getattr(character_manager, 'ko_elevenlabs_tags', '') or ''
+    if tag_lib.strip():
+        parts.append(tag_lib)
+    card = getattr(character_manager, 'character_card', '') or ''
+    if card.strip():
+        parts.append(f"### Character\n{card.strip()}")
+    parts.append(CONFIG['LLM'].get('systemprompt', ''))
+    parts.append(CONFIG['LLM'].get('instructionprompt', ''))
+    text = "\n".join(p for p in parts if p and p.strip())
+    text = text.replace('{char}', char_name).replace('{user}', user_name).strip()
+    return text or None
+
+
+def _prepare_request_data(llm_backend, prompt, system_prompt=None):
     """
     Prepare the request URL and data for the LLM backend.
 
     Parameters:
     - llm_backend (str): The LLM backend name.
     - prompt (str): The formatted prompt.
+    - system_prompt (str|None): Optional system-role content (persona enforcement).
 
     Returns:
     - tuple: URL and data payload for the request.
     """
     if llm_backend == "openai":
-        url = f"{CONFIG['LLM']['base_url']}/v1/chat/completions"
+        model = CONFIG['LLM']['openai_model']
+        base_url = CONFIG['LLM']['base_url'].rstrip('/')
+        if model.lower().startswith('gemini-'):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         data = {
-            "model": CONFIG['LLM']['openai_model'],
-            "messages": [
-                {"role": "system", "content": CONFIG['LLM']['systemprompt']},
-                {"role": "user", "content": prompt}
-            ],
+            "model": model,
+            "messages": messages,
             "max_tokens": CONFIG['LLM']['max_tokens'],
             "temperature": CONFIG['LLM']['temperature'],
             "top_p": CONFIG['LLM']['top_p']
         }
+        # Gemini 2.5 "thinking" tokens are billed against max_tokens; with a small
+        # max_tokens the visible reply gets truncated mid-sentence. Disable thinking
+        # via the OpenAI-compat reasoning_effort param (gemini-2.5 only, so real
+        # OpenAI models like gpt-4o-mini are untouched).
+        effort = str(CONFIG['LLM'].get('reasoning_effort', '') or '').strip().lower()
+        if not effort and 'gemini-2.5' in model.lower():
+            effort = 'none'
+        if effort:
+            data['reasoning_effort'] = effort
     elif llm_backend == "deepinfra":
         url = f"{CONFIG['LLM']['base_url']}/v1/openai/chat/completions"
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         data = {
             "model": CONFIG['LLM']['openai_model'],
-            "messages": [
-                {"role": "system", "content": CONFIG['LLM']['systemprompt']},
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "max_tokens": CONFIG['LLM']['max_tokens'],
             "temperature": CONFIG['LLM']['temperature'],
             "top_p": CONFIG['LLM']['top_p']
@@ -183,6 +236,7 @@ def llm_process(user_input, bot_response):
     - str: The processed bot response.
     """
     if memory_manager:
+        memory_manager.add_session_turn(user_input, bot_response)
         threading.Thread(target=memory_manager.write_longterm_memory, args=(user_input, bot_response)).start()
     
     if CONFIG['EMOTION']['enabled']:

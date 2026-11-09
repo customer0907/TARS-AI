@@ -34,6 +34,14 @@ from modules.module_messageQue import queue_message
 
 CONFIG = load_config()
 
+# Fine-tuned gyuna checkpoint (optional). Place files here on the Pi:
+#   src/tts/gyuna/G_8500.pth
+#   src/tts/gyuna/config.json
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_GYUNA_DIR = os.path.join(_SCRIPT_DIR, "..", "tts", "gyuna")
+_GYUNA_CKPT = os.path.join(_GYUNA_DIR, "G_8500.pth")
+_GYUNA_CONFIG = os.path.join(_GYUNA_DIR, "config.json")
+
 # Loaded lazily inside _ensure_loaded()
 _VOICE = None
 _SPEAKER_ID = None
@@ -50,16 +58,27 @@ def _ensure_loaded():
         # is not installed (other TTS engines still work).
         from melo.api import TTS
 
-        queue_message(
-            "INFO: Loading MeloTTS Korean (first run downloads ~250MB, can take a few minutes)..."
-        )
-        _VOICE = TTS(language="KR", device="cpu")
+        use_gyuna = os.path.isfile(_GYUNA_CKPT) and os.path.isfile(_GYUNA_CONFIG)
+        if use_gyuna:
+            queue_message(f"INFO: Loading MeloTTS gyuna fine-tune from {_GYUNA_CKPT}")
+            _VOICE = TTS(
+                language="KR",
+                device="cpu",
+                config_path=_GYUNA_CONFIG,
+                ckpt_path=_GYUNA_CKPT,
+            )
+        else:
+            queue_message(
+                "INFO: Loading MeloTTS Korean pretrained (first run downloads ~250MB)..."
+            )
+            _VOICE = TTS(language="KR", device="cpu")
         spk2id = _VOICE.hps.data.spk2id
-        # pretrained Korean has a single speaker, typically keyed "KR".
+        # Fine-tune uses "gyuna"; pretrained uses "KR". tts_to_file wants numeric id.
         _SPEAKER_ID = next(iter(spk2id.values()))
         _SAMPLE_RATE = int(_VOICE.hps.data.sampling_rate)
+        label = "gyuna fine-tune" if use_gyuna else "pretrained"
         queue_message(
-            f"INFO: MeloTTS Korean loaded (sr={_SAMPLE_RATE}, speakers={list(spk2id)})"
+            f"INFO: MeloTTS loaded ({label}, sr={_SAMPLE_RATE}, speakers={list(spk2id.keys())})"
         )
     except Exception as e:
         queue_message(f"ERROR: failed to load MeloTTS Korean: {e}")
@@ -67,7 +86,7 @@ def _ensure_loaded():
 
 
 # Pre-load only when this engine is the configured one.
-if CONFIG.get("TTS", {}).get("ttsoption", "").lower() == "melotts_ko":
+if CONFIG["TTS"]["ttsoption"].lower() == "melotts_ko":
     _ensure_loaded()
 
 

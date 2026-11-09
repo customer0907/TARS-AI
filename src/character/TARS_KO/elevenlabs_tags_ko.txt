@@ -1,0 +1,24 @@
+# ElevenLabs v3 — pick 0~1 per reply (max 2 only for intense game/roast beats). Do not copy example lines verbatim.
+
+## Rules
+- Default: **no tag**. Most casual replies need zero tags; let Korean tone carry emotion.
+- If used: one tag at start OR middle OR end — not every sentence.
+- Vary every turn. Never use the same opening tag as your previous reply.
+- Dry facts (time, volume, weather, snack chat, quiz answer): usually no tag.
+- Game tease / big laugh: rotate [teasingly] [playful] [mocking] [giggle] [laughs harder] [sarcastic] — sparingly.
+
+## Emotional tone
+[excited], [nervous], [frustrated], [tired], [happy], [sad], [angry], [calm], [cheerful], [sarcastic], [curious], [surprised], [scared], [confident], [shy], [annoyed], [playful], [resigned], [wistful], [deadpan], [mischievously], [flustered], [teasingly], [mocking], [smug], [condescending]
+
+## Reactions
+[laughs], [laughs harder], [starts laughing], [wheezing], [gasp], [sigh], [sighs], [gulps], [snorts], [exhales], [giggle], [cackle], [evil laugh]
+
+## Volume & pacing
+[whispers], [whispering], [shouting], [loudly], [quietly], [softly], [pause], [hesitates], [rushed], [fast-paced]
+
+## TARS_KO scene map
+- 퀴즈·잡담·음식·취향: often **no tag**; [playful] or [curious] at most once
+- 롤 패닉/죽음: [teasingly], [giggle], [laughs harder] — max 1
+- 롤 스킬/반격: [confident] or no tag
+- 사실·볼륨·시간: [deadpan] or no tag
+- 건조 TARS 한마디: [deadpan], [matter-of-fact]

@@ -6,8 +6,43 @@ Utility module for building prompts for LLM backends.
 
 from datetime import datetime
 import os
+import re
 from modules.module_engine import check_for_module
 from modules.module_messageQue import queue_message
+
+_KO_TAG_ROTATION = (
+    "mocking", "condescending", "teasingly", "laughs harder", "giggle",
+    "sarcastic", "evil laugh", "cackle", "playful",
+)
+
+
+
+def _ko_variety_hint(memory_manager, user_prompt: str = "") -> str:
+    """Nudge LLM away from anchoring on the previous reply's tags and catchphrases."""
+    if not memory_manager or not getattr(memory_manager, "session_turns", None):
+        return ""
+    if not memory_manager.session_turns:
+        return ""
+
+    last_bot = memory_manager.session_turns[-1][1] or ""
+
+    last_tags = [t.lower() for t in re.findall(r"\[([^\]]+)\]", last_bot)]
+    lines = ["### This-turn variety (mandatory):"]
+
+    if last_tags:
+        banned = ", ".join(f"[{t}]" for t in last_tags[:3])
+        alts = ", ".join(f"[{t}]" for t in _KO_TAG_ROTATION if t not in last_tags[:2])
+        lines.append(
+            f"- Previous reply used {banned}. Do NOT reuse the same opening tag(s). "
+            f"Pick different tag(s) e.g. {alts}, or use zero tags."
+        )
+    if "[smug]" in last_bot.lower() or (last_tags and last_tags[0] == "smug"):
+        lines.append("- Do NOT start with [smug] this turn.")
+
+    if len(lines) <= 1:
+        return ""
+    return "\n".join(lines) + "\n---\n\n"
+
 
 def build_prompt(user_prompt, character_manager, memory_manager, config, debug=False):
     """
@@ -29,23 +64,39 @@ def build_prompt(user_prompt, character_manager, memory_manager, config, debug=F
     char_name = character_manager.char_name
     functioncall = check_for_module(user_prompt)
 
-    # Construct persona traits
-    persona_traits = "\n".join(
-        [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
-    )
+    language = config['CHAR'].get('language', 'en')
+    user_details = config['CHAR'].get('user_details', '')
 
-    
-    # Build the base prompt
-    base_prompt = (
-        f"System: {config['LLM']['systemprompt']}\n\n"
-        f"### Instruction:\n{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
-        f"### Interaction Context:\n---\n"
-        f"User: {user_name}\n"
-        f"Character: {char_name}\n"
-        f"{dtg}\n---\n\n"
-        f"### Character Details:\n---\n{character_manager.character_card}\n---\n\n"
-        f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
-    )
+    # ko: persona lives in API system role (persona_ko.txt + config). User turn = context only.
+    if language == 'ko':
+        persona_traits = "\n".join(
+            [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
+        )
+        variety = _ko_variety_hint(memory_manager, user_prompt)
+        base_prompt = (
+            f"### Interaction Context:\n---\n"
+            f"User: {user_name}\n"
+            f"Character: {char_name}\n"
+            f"{user_details}\n"
+            f"{dtg}\n---\n\n"
+            f"{variety}"
+            f"### {char_name} Settings (sliders):\n{persona_traits}\n---\n\n"
+        )
+    else:
+        persona_traits = "\n".join(
+            [f"- {trait}: {value}" for trait, value in character_manager.traits.items()]
+        )
+        base_prompt = (
+            f"System: {config['LLM']['systemprompt']}\n\n"
+            f"### Instruction:\n"
+            f"{inject_dynamic_values(config['LLM']['instructionprompt'], user_name, char_name)}\n\n"
+            f"### Interaction Context:\n---\n"
+            f"User: {user_name}\n"
+            f"Character: {char_name}\n"
+            f"{dtg}\n---\n\n"
+            f"### Character Details:\n---\n{character_manager.character_card}\n---\n\n"
+            f"### {char_name} Settings:\n{persona_traits}\n---\n\n"
+        )
 
     # Dynamically append memory and examples
     final_prompt = append_memory_and_examples(
@@ -121,16 +172,37 @@ def append_memory_and_examples(base_prompt, user_prompt, memory_manager, config,
         available_tokens -= memory_length
         #queue_message(f"Tokens after short term {available_tokens}")
 
-    # Add example dialog only if there's space remaining
-    if available_tokens > 0 and character_manager.example_dialogue:
+    # ko: never inject mes_example (models copy scripted lines). en: use card examples.
+    use_examples = (
+        config['CHAR'].get('language', 'en') != 'ko'
+        and bool(character_manager.example_dialogue)
+    )
+    if available_tokens > 0 and use_examples:
         example_length = memory_manager.token_count(character_manager.example_dialogue).get('length', 0)
         if example_length <= available_tokens:
-            example_dialog = f"### Example Dialog:\n{character_manager.example_dialogue}\n---\n"
+            example_dialog = (
+                f"### Example Dialog (tone reference only; never copy lines verbatim):\n"
+                f"{character_manager.example_dialogue}\n---\n"
+            )
+
+    tool_answer_rule = ""
+    if isinstance(functioncall, str) and functioncall.startswith("SEARCH_TOOL_RESULT"):
+        tool_answer_rule = (
+            "### Search Answer Rule:\n"
+            "- The Function Calling Tool contains Answer JSON extracted from search results.\n"
+            "- Use that Answer JSON as the factual source of truth.\n"
+            "- Do not contradict it, invent missing scores/prices/dates, or reuse earlier wrong answers.\n"
+            "- If answer_found is true, answer the user's factual question first and preserve the extracted facts exactly.\n"
+            "- If answer_found is false, say the search results did not clearly answer it instead of guessing.\n"
+            "- Keep the final reply conversational, but do not add unrelated advice such as telling the user to sleep.\n"
+            "---\n"
+        )
 
     # Append memory and examples to the prompt
     return (
         f"{base_prompt}"
         f"{example_dialog}"
+        f"{tool_answer_rule}"
         f"### Memory:\n---\nLong-Term Context:\n{past_memory}\n---\n"
         f"Recent Conversation:\n{short_term_memory}\n---\n"
         f"### Interaction:\n{config['CHAR']['user_name']}: {user_prompt}\n\n"

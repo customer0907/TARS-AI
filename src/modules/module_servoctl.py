@@ -61,12 +61,13 @@ perfectStaroffset = int(config["SERVO"]["perfectStaroffset"])  # Use this to fin
 
 # moves the torso from a neutral position upwards, allowing the torso to pivot forwards or backwards
 def height_neutral_to_up():
+	pwm.set_pwm(0,0,neutralHeight)
 	height = neutralHeight
 	#queue_message('setting center servo (0) Neutral --> Up position')
-	while (height > upHeight):
-		height = height - 1
-		pwm.set_pwm(0, 0, height)
-		time.sleep(0.001)
+	#while (height > upHeight):
+	#	height = height - 1
+	#	pwm.set_pwm(0, 0, height)
+	#	time.sleep(0.001)
 	#queue_message('center servo (0) set to: Up position\n ')
 
 # rotates the torso outwards, enough so that when TARS pivots and lands, the bottom of the torso is 
@@ -75,6 +76,8 @@ def height_neutral_to_up():
 # allowing for a simple walking program, inhibited TARS' ability to walk on surfaces with different 
 # coefficients of friction
 def torso_neutral_to_forwards():
+	#pwm.set_pwm(1, 0, neutralPort+82)
+	#pwm.set_pwm(2, 0, neutralStarboard-10)
 	port = neutralPort
 	starboard = neutralStarboard
 	#queue_message('setting port and starboard servos (1)(2) Neutral --> Forward')

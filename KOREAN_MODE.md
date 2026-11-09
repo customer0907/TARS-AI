@@ -1,81 +1,80 @@
 # TARS-AI Korean Mode
 
-기존 TARS-AI를 한국어로 동작시키는 통합 가이드.
+기존 TARS-AI�??�국?�로 ?�작?�키???�합 가?�드.
 
-## 무엇이 바뀌었나 (이미 적용됨)
+## 무엇??바뀌었??(?��? ?�용??
 
-| 파일 | 변경 |
+| ?�일 | 변�?|
 |---|---|
-| `src/modules/module_melotts.py` | **새 파일** — MeloTTS-Korean 래퍼, `module_piper.py`와 동일한 async-generator 인터페이스 |
-| `src/modules/module_tts.py` | `ttsoption=melotts_ko` 분기 추가 |
-| `src/modules/module_main.py` | LLM 응답에서 한글 다 죽이던 ASCII-only regex → Unicode 보존 regex 로 교체 |
-| `src/modules/module_stt.py` | `language="en"` 하드코딩 → `[STT] stt_language` 로 설정화 |
-| `src/config.ini.template` | `stt_language`, `melotts_ko` 옵션, 한국어 systemprompt 가이드 추가 |
-| `src/requirements.txt` | MeloTTS 설치 명령어 주석 추가 |
+| `src/modules/module_melotts.py` | **???�일** ??MeloTTS-Korean ?�퍼, `module_piper.py`?� ?�일??async-generator ?�터?�이??|
+| `src/modules/module_tts.py` | `ttsoption=melotts_ko` 분기 추�? |
+| `src/modules/module_main.py` | LLM ?�답?�서 ?��? ??죽이??ASCII-only regex ??Unicode 보존 regex �?교체 |
+| `src/modules/module_stt.py` | `language="en"` ?�드코딩 ??`[STT] stt_language` �??�정??|
+| `src/config.ini.template` | `stt_language`, `melotts_ko` ?�션, ?�국??systemprompt 가?�드 추�? |
+| `src/requirements.txt` | MeloTTS ?�치 명령??주석 추�? |
 
-코드 수정 4줄 + 새 파일 1개. 영어 모드는 그대로 동작합니다.
+코드 ?�정 4�?+ ???�일 1�? ?�어 모드??그�?�??�작?�니??
 
-## RPi5 셋업
+## RPi5 ?�업
 
 ### 1. 코드 받기
 
 ```bash
-cd ~/TARS-AI
-git pull
+cd ~/TARS`ngit pull origin main`ngit pull
 ```
 
-### 2. 한국어 TTS 추가 설치 (~3~5분, ~500MB 디스크)
+### 2. ?�국??TTS 추�? ?�치 (~3~5�? ~500MB ?�스??
 
 ```bash
-source ~/tars-venv/bin/activate    # 본인 venv 경로에 맞게
+source ~/tars-venv/bin/activate    # 본인 venv 경로??맞게
 
 pip install git+https://github.com/myshell-ai/MeloTTS.git
 pip install g2pkk python-mecab-ko unidic-lite
 python -m unidic download
 ```
 
-### 3. config.ini 한국어 모드 설정
+### 3. config.ini ?�국??모드 ?�정
 
-`src/config.ini` 에서:
+`src/config.ini` ?�서:
 
 ```ini
 [STT]
-wake_word = 야 타스
+wake_word = ???�??
 stt_processor = faster-whisper
 whisper_model = base
 stt_language = ko
 
 [LLM]
-systemprompt = 너는 친근한 한국어 음성 비서다. 모든 답변은 반드시 한국어로만 짧게 한 두 문장으로 한다. 영어, 이모지, 특수문자는 절대 사용하지 않는다.
+systemprompt = ?�는 친근???�국???�성 비서?? 모든 ?��??� 반드???�국?�로�?짧게 ????문장?�로 ?�다. ?�어, ?�모지, ?�수문자???��? ?�용?��? ?�는??
 
 [TTS]
 ttsoption = melotts_ko
 ```
 
-### 4. 첫 실행
+### 4. �??�행
 
 ```bash
-cd ~/TARS-AI/src
+cd ~/TARS/src
 source ~/tars-venv/bin/activate
 python app.py
 ```
 
-- 첫 응답 시 MeloTTS-Korean 모델 ~250MB 자동 다운로드 (HuggingFace `myshell-ai/MeloTTS-Korean`)
-- 이후 캐시되어 다음부터 즉시 로드
+- �??�답 ??MeloTTS-Korean 모델 ~250MB ?�동 ?�운로드 (HuggingFace `myshell-ai/MeloTTS-Korean`)
+- ?�후 캐시?�어 ?�음부??즉시 로드
 
-### 5. 영어/한국어 모드 토글
+### 5. ?�어/?�국??모드 ?��?
 
-config.ini 5줄만 바꾸면 됨:
+config.ini 5줄만 바꾸�???
 
-| 영어 모드 | 한국어 모드 |
+| ?�어 모드 | ?�국??모드 |
 |---|---|
 | `ttsoption = piper` | `ttsoption = melotts_ko` |
 | `stt_language = en` | `stt_language = ko` |
-| `wake_word = hey tar` | `wake_word = 야 타스` |
+| `wake_word = hey tar` | `wake_word = ???�?? |
 | `whisper_model = tiny` | `whisper_model = base` |
-| 영어 systemprompt | 한국어 systemprompt |
+| ?�어 systemprompt | ?�국??systemprompt |
 
-## 트러블슈팅
+## ?�러블슈??
 
 ### `ERROR: failed to load MeloTTS Korean: No module named 'melo'`
 
@@ -84,15 +83,15 @@ source ~/tars-venv/bin/activate
 pip install git+https://github.com/myshell-ai/MeloTTS.git
 ```
 
-### 한국어 인식이 자꾸 영어로 transcribe됨
+### ?�국???�식???�꾸 ?�어�?transcribe??
 
-- `[STT] stt_language = ko` 가 config.ini 에 있는지 확인
-- `whisper_model = base` 또는 `small` 로 키우기 (tiny는 한국어 거의 못 알아들음)
+- `[STT] stt_language = ko` 가 config.ini ???�는지 ?�인
+- `whisper_model = base` ?�는 `small` �??�우�?(tiny???�국??거의 �??�아?�음)
 
-### LLM이 영어로 답함
+### LLM???�어�??�함
 
-`[LLM] systemprompt` 가 한국어로 답하라는 지시어인지 확인.
+`[LLM] systemprompt` 가 ?�국?�로 ?�하?�는 지?�어?��? ?�인.
 
-### 영어 모드로 돌아가고 싶음
+### ?�어 모드�??�아가�??�음
 
-`config.ini` 의 5줄만 원복하면 끝. 코드 수정은 영어 모드에 영향 없도록 짜둠.
+`config.ini` ??5줄만 ?�복?�면 ?? 코드 ?�정?� ?�어 모드???�향 ?�도�?짜둠.

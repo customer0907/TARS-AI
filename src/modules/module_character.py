@@ -28,9 +28,14 @@ class CharacterManager:
         self.world_scenario = None
         self.char_greeting = None
         self.example_dialogue = None
+        self.ko_persona_block = ""
+        self.ko_elevenlabs_tags = ""
+        self.traits = {}
         self.voice_only = config['TTS']['voice_only']
         self.load_character_attributes()
         self.load_persona_traits()
+        self.load_ko_persona_block()
+        self.load_ko_elevenlabs_tags()
 
     def load_character_attributes(self):
         """
@@ -81,3 +86,33 @@ class CharacterManager:
             #queue_message("Traits loaded:", self.traits)
         except Exception as e:
             queue_message(f"ERROR: Error while loading persona traits: {e}")
+
+    def load_ko_persona_block(self):
+        """Load discord-style persona file for Korean mode (system role)."""
+        if self.config['CHAR'].get('language', 'en') != 'ko':
+            return
+        persona_path = os.path.join("..", "character", self.char_name, "persona_ko.txt")
+        try:
+            with open(persona_path, "r", encoding="utf-8") as handle:
+                self.ko_persona_block = handle.read().strip()
+            if self.ko_persona_block:
+                queue_message(f"LOAD: Korean persona block loaded ({len(self.ko_persona_block)} chars)")
+        except FileNotFoundError:
+            queue_message(f"LOAD: No persona_ko.txt at {persona_path}")
+        except Exception as e:
+            queue_message(f"ERROR: Failed to load persona_ko.txt: {e}")
+
+    def load_ko_elevenlabs_tags(self):
+        """Load ElevenLabs v3 tag reference for Korean system prompt."""
+        if self.config['CHAR'].get('language', 'en') != 'ko':
+            return
+        tags_path = os.path.join("..", "character", self.char_name, "elevenlabs_tags_ko.txt")
+        try:
+            with open(tags_path, "r", encoding="utf-8") as handle:
+                self.ko_elevenlabs_tags = handle.read().strip()
+            if self.ko_elevenlabs_tags:
+                queue_message("LOAD: ElevenLabs tag library loaded for ko")
+        except FileNotFoundError:
+            queue_message(f"LOAD: No elevenlabs_tags_ko.txt at {tags_path}")
+        except Exception as e:
+            queue_message(f"ERROR: Failed to load elevenlabs_tags_ko.txt: {e}")

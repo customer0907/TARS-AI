@@ -8,6 +8,7 @@ Ensures contextual and historical knowledge during interactions.
 """
 # === Standard Libraries ===
 import os
+import re
 import json
 import requests
 from typing import List
@@ -21,6 +22,46 @@ from modules.module_config import load_config
 from modules.module_messageQue import queue_message
 
 CONFIG = load_config()
+
+# Casual chat / bot-opinion turns are not stored or retrieved — only user facts persist.
+_EPHEMERAL_CHAT_PATTERNS = [
+    r'너[가는]?',
+    r'넌\b',
+    r'니가\b',
+    r'추천',
+    r'알려\s*줘',
+    r'말해\s*줘',
+    r'생각해\s*봐',
+    r'챔피언',
+    r'골\s*챔',
+    r'롤\b',
+    r'리그\s*오브',
+    r'게임\s*(좀|하나|추천|뭐|어때)',
+    r'뭐\s*(가\s*)?(재밌|좋)',
+    r'누구\s*좋아',
+    r'다른\s*(사람|챔|거|건)',
+    r'^왜\b',
+    r'왜\s*\?',
+    r'왜\s*좋',
+    r'왜\s*그',
+]
+
+_USER_FACT_PATTERNS = [
+    r'(?:^|[.\s])(?:나|내|저|우리)\s*(?:는|가|의)?\s*.+(?:좋아|싫어|선호|먹|마셔|기억)',
+    r'기억해\s*줘',
+    r'잊지\s*마',
+    r'내\s+(?:이름|생일|나이|직업|취미|주소|번호|전화)',
+]
+
+_SESSION_CONTEXT_PATTERNS = [
+    r'무슨\s*얘기',
+    r'뭐\s*얘기',
+    r'이야기\s*하고\s*있',
+    r'방금\s*얘기',
+    r'아까\s*얘기',
+    r'지금\s*.*얘기',
+]
+
 
 class MemoryManager:
     """
@@ -43,6 +84,7 @@ class MemoryManager:
         self.long_mem_use = True
         self.initial_memory_path =  os.path.abspath(os.path.join(os.path.join("..", "memory", "initial_memory.json")))
         
+        self.session_turns = []
         self.init_dynamic_memory()
         self.load_initial_memory(self.initial_memory_path)
 
@@ -60,8 +102,57 @@ class MemoryManager:
                 queue_message(f"LOAD: Memory loaded successfully")
         else:
             queue_message(f"LOAD: No memory DB found. Creating new one: {self.memory_db_path}")
-            self.hyper_db.add_document({"text": f'{self.char_name}: {self.char_greeting}'})
+            if self.char_greeting and self.char_greeting.strip():
+                self.hyper_db.add_document({"text": f'{self.char_name}: {self.char_greeting}'})
             self.hyper_db.save(self.memory_db_path)
+
+    def _is_ephemeral_chat(self, user_input: str) -> bool:
+        text = (user_input or "").strip()
+        if not text:
+            return True
+        for pattern in _EPHEMERAL_CHAT_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        return False
+
+    def _is_user_fact(self, user_input: str) -> bool:
+        text = (user_input or "").strip()
+        if not text:
+            return False
+        user_name = self.config.get('CHAR', {}).get('user_name', '')
+        if user_name and user_name in text and re.search(r'좋아|싫어|생일|이름|기억', text):
+            return True
+        for pattern in _USER_FACT_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        return False
+
+    def _should_persist_memory(self, user_input: str, bot_response: str) -> bool:
+        if self._is_ephemeral_chat(user_input):
+            return False
+        return self._is_user_fact(user_input)
+
+    def _is_retrievable_document(self, document: dict) -> bool:
+        user_input = document.get('user_input', '')
+        if not user_input:
+            return True
+        return self._should_persist_memory(user_input, document.get('bot_response', ''))
+
+    def _is_session_context_query(self, user_input: str) -> bool:
+        text = (user_input or "").strip()
+        if not text:
+            return False
+        for pattern in _SESSION_CONTEXT_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+        return False
+
+    def add_session_turn(self, user_input: str, bot_response: str):
+        user_input = (user_input or "").strip()
+        bot_response = (bot_response or "").strip()
+        if not user_input or not bot_response:
+            return
+        self.session_turns.append((user_input, bot_response))
 
     def write_longterm_memory(self, user_input: str, bot_response: str):
         """
@@ -71,6 +162,9 @@ class MemoryManager:
         - user_input (str): The user's input.
         - bot_response (str): The bot's response.
         """
+        if not self._should_persist_memory(user_input, bot_response):
+            return
+
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         document = {
             "timestamp": current_time,
@@ -98,25 +192,30 @@ class MemoryManager:
             )
             
             if results:
-                memory = results[0]
                 memory_list = self.hyper_db.dict()
 
-                # Find the index of the memory for context retrieval
-                start_index = next((i for i, d in enumerate(memory_list) if d['document'] == memory), None)
+                for memory in results:
+                    if not self._is_retrievable_document(memory):
+                        continue
 
-                if start_index is not None:
+                    start_index = next((i for i, d in enumerate(memory_list) if d['document'] == memory), None)
+                    if start_index is None:
+                        continue
+
                     prev_count = 1
                     post_count = 1
-
-                    # Calculate indices for surrounding context
                     start = max(start_index - prev_count, 0)
                     end = min(start_index + post_count + 1, len(memory_list))
 
-                    # Retrieve and format the context memories
-                    result = [memory_list[i]['document'] for i in range(start, end)]
-                    return result
-                else:
-                    return f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARN: Could not locate memory in the database. Memory: {memory}"
+                    result = [
+                        memory_list[i]['document']
+                        for i in range(start, end)
+                        if self._is_retrievable_document(memory_list[i]['document'])
+                    ]
+                    if result:
+                        return result
+
+                return f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARN: No user-fact memories found for the query."
             else:
                 return f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARN: No memories found for the query."
         except Exception as e:
@@ -134,6 +233,8 @@ class MemoryManager:
         - str: Relevant memory or a fallback message.
         """
         try:
+            if self._is_session_context_query(user_input):
+                return "No relevant memories found."
             if self.long_mem_use:
                 # Fetch related memories
                 past = self.get_related_memories(user_input)
@@ -170,6 +271,22 @@ class MemoryManager:
         accumulated_documents = []
         accumulated_length = 0
 
+        def try_add_turn(user_input, bot_response):
+            nonlocal accumulated_length
+            if not user_input or not bot_response:
+                return False
+            text_str = f"user_input: {user_input}\nbot_response: {bot_response}"
+            text_length = self.token_count(text_str)['length']
+            if accumulated_length + text_length > token_limit:
+                return False
+            accumulated_documents.append((user_input, bot_response))
+            accumulated_length += text_length
+            return True
+
+        for user_input, bot_response in reversed(self.session_turns):
+            if not try_add_turn(user_input, bot_response):
+                break
+
         for entry in reversed(self.hyper_db.dict()):
             user_input = entry['document'].get('user_input', "")
             bot_response = entry['document'].get('bot_response', "")
@@ -177,14 +294,11 @@ class MemoryManager:
             if not user_input or not bot_response:
                 continue
 
-            text_str = f"user_input: {user_input}\nbot_response: {bot_response}"
-            text_length = self.token_count(text_str)['length']
+            if not self._is_retrievable_document(entry['document']):
+                continue
 
-            if accumulated_length + text_length > token_limit:
+            if not try_add_turn(user_input, bot_response):
                 break
-
-            accumulated_documents.append((user_input, bot_response))
-            accumulated_length += text_length
 
         formatted_output = '\n'.join(
             [f"{{user}}: {ui}\n{{char}}: {br}" for ui, br in reversed(accumulated_documents)]

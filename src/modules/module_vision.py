@@ -49,9 +49,10 @@ def initialize_blip():
         queue_message(f"INFO: Initializing BLIP model...")
         PROCESSOR = BlipProcessor.from_pretrained(MODEL_NAME, cache_dir=str(CACHE_DIR))
         MODEL = BlipForConditionalGeneration.from_pretrained(MODEL_NAME, cache_dir=str(CACHE_DIR)).to(DEVICE)
-        MODEL = torch.quantization.quantize_dynamic(
-            MODEL, {torch.nn.Linear}, dtype=torch.qint8
-        )
+        #MODEL = torch.quantization.quantize_dynamic(
+        #    MODEL, {torch.nn.Linear}, dtype=torch.qint8
+        #)
+	# 260528 임시주석
         queue_message(f"INFO: BLIP model initialized.")
 
 

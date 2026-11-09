@@ -288,7 +288,9 @@ class HyperDB:
             queue_message("Error: Unable to get embeddings for the document.")
             return
 
-        if self.vectors is None:
+        # Treat None or any zero-size array (e.g. an empty DB restored as (0, 0))
+        # as "first insert" and seed the column dimension from this vector.
+        if self.vectors is None or self.vectors.size == 0:
             self.vectors = np.empty((0, len(vector)), dtype=np.float32)
         elif len(vector) != self.vectors.shape[1]:
             raise ValueError("All vectors must have the same length.")
@@ -306,7 +308,9 @@ class HyperDB:
             queue_message("Error: Unable to get embeddings for the document.")
             return
 
-        if self.vectors is None:
+        # Treat None or any zero-size array (e.g. an empty DB restored as (0, 0))
+        # as "first insert" and seed the column dimension from this vector.
+        if self.vectors is None or self.vectors.size == 0:
             self.vectors = np.empty((0, len(vector)), dtype=np.float32)
         elif len(vector) != self.vectors.shape[1]:
             raise ValueError("All vectors must have the same length.")

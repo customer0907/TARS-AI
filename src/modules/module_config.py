@@ -40,6 +40,12 @@ class TTSConfig:
     elevenlabs_api_key: Optional[str] = None
     voice_id: Optional[str] = None
     model_id: Optional[str] = None
+
+    # Fish Audio specific settings
+    fishaudio_api_key: Optional[str] = None
+    fishaudio_reference_id: Optional[str] = None
+    fishaudio_model: Optional[str] = None
+    fishaudio_format: Optional[str] = None
     
     # Server specific settings
     ttsurl: Optional[str] = None
@@ -57,6 +63,13 @@ class TTSConfig:
         elif self.ttsoption == "elevenlabs":
             if not self.elevenlabs_api_key:
                 queue_message("ERROR: ElevenLabs API key is required for ElevenLabs TTS")
+                return False
+        elif self.ttsoption == "fishaudio":
+            if not self.fishaudio_api_key:
+                queue_message("ERROR: Fish Audio API key is required for Fish Audio TTS")
+                return False
+            if not self.fishaudio_reference_id:
+                queue_message("ERROR: Fish Audio reference_id is required for Fish Audio TTS")
                 return False
         elif self.ttsoption in ["xttsv2", "alltalk"]:
             if not self.ttsurl:
@@ -80,6 +93,10 @@ class TTSConfig:
             elevenlabs_api_key=config_dict.get('elevenlabs_api_key'),
             voice_id=config_dict.get('voice_id'),
             model_id=config_dict.get('model_id'),
+            fishaudio_api_key=config_dict.get('fishaudio_api_key'),
+            fishaudio_reference_id=config_dict.get('fishaudio_reference_id'),
+            fishaudio_model=config_dict.get('fishaudio_model'),
+            fishaudio_format=config_dict.get('fishaudio_format'),
             ttsurl=config_dict.get('ttsurl')
         )
 
@@ -103,8 +120,23 @@ def load_config():
     config_path = os.path.join(base_dir, 'config.ini')  # Ensures it joins "src/config.ini"
     config.read(config_path)  # Should correctly read "src/config.ini"
 
+    # === Language toggle (en/ko) ===
+    # Master switch in [CHAR]. Language-specific keys use a "<key>_<language>" suffix.
+    # _lang_get() picks the suffixed key if present, else the plain key, else fallback.
+    # This means an existing config without any _ko keys still behaves exactly as before
+    # (defaults to English), so reverting is just: language = en
+    language = config.get('CHAR', 'language', fallback='en').strip().lower()
+
+    def _lang_get(section, key, fallback=None):
+        lang_key = f"{key}_{language}"
+        if config.has_option(section, lang_key):
+            return config.get(section, lang_key)
+        if config.has_option(section, key):
+            return config.get(section, key)
+        return fallback
+
     # Parse the persona.ini file
-    character_path = config.get("CHAR", "character_card_path")  # Get full path
+    character_path = _lang_get("CHAR", "character_card_path")  # Get full path (language-aware)
     character_name = os.path.splitext(os.path.basename(character_path))[0]  # Extract filename without extension
 
     persona_config = configparser.ConfigParser()
@@ -134,29 +166,132 @@ def load_config():
         queue_message("ERROR: [PERSONA] section missing in persona.ini.")
         sys.exit(1)
 
+    voice_pipeline_mode = config.get(
+        'VOICE_PIPELINE', 'mode', fallback='traditional'
+    ).strip().lower()
+    if voice_pipeline_mode not in ('traditional', 'gemini_live'):
+        queue_message(
+            "ERROR: [VOICE_PIPELINE] mode must be 'traditional' or 'gemini_live'."
+        )
+        sys.exit(1)
+
     # Extract and return combined configurations
     return {
         "BASE_DIR": base_dir,
+        "VOICE_PIPELINE": {
+            "mode": voice_pipeline_mode,
+        },
+        "GEMINI_LIVE": {
+            "api_key": os.getenv('GEMINI_API_KEY'),
+            "model": config.get(
+                'GEMINI_LIVE', 'model', fallback='gemini-3.1-flash-live-preview'
+            ).strip(),
+            "voice_name": config.get(
+                'GEMINI_LIVE', 'voice_name', fallback='Kore'
+            ).strip(),
+            "language_code": config.get(
+                'GEMINI_LIVE',
+                'language_code',
+                fallback='ko-KR' if language == 'ko' else 'en-US',
+            ).strip(),
+            "thinking_level": config.get(
+                'GEMINI_LIVE', 'thinking_level', fallback='minimal'
+            ).strip().lower(),
+            "temperature": config.getfloat(
+                'GEMINI_LIVE', 'temperature', fallback=0.8
+            ),
+            "native_google_search": config.getboolean(
+                'GEMINI_LIVE', 'native_google_search', fallback=False
+            ),
+            "traditional_tool_fallback": config.getboolean(
+                'GEMINI_LIVE', 'traditional_tool_fallback', fallback=True
+            ),
+            "home_assistant_tool": config.getboolean(
+                'GEMINI_LIVE', 'home_assistant_tool', fallback=True
+            ),
+            "save_transcripts": config.getboolean(
+                'GEMINI_LIVE', 'save_transcripts', fallback=True
+            ),
+            "stream_output_transcript": config.getboolean(
+                'GEMINI_LIVE', 'stream_output_transcript', fallback=True
+            ),
+            "input_preprocessing": config.getboolean(
+                'GEMINI_LIVE', 'input_preprocessing', fallback=True
+            ),
+            "input_highpass_hz": max(
+                0.0,
+                config.getfloat('GEMINI_LIVE', 'input_highpass_hz', fallback=80.0),
+            ),
+            "input_noise_gate_dbfs": config.getfloat(
+                'GEMINI_LIVE', 'input_noise_gate_dbfs', fallback=-48.0
+            ),
+            "input_noise_attenuation_db": max(
+                0.0,
+                config.getfloat(
+                    'GEMINI_LIVE', 'input_noise_attenuation_db', fallback=18.0
+                ),
+            ),
+            "input_target_dbfs": config.getfloat(
+                'GEMINI_LIVE', 'input_target_dbfs', fallback=-24.0
+            ),
+            "input_max_gain_db": max(
+                0.0,
+                config.getfloat('GEMINI_LIVE', 'input_max_gain_db', fallback=12.0),
+            ),
+            "mute_input_during_playback": config.getboolean(
+                'GEMINI_LIVE', 'mute_input_during_playback', fallback=True
+            ),
+            "echo_tail_ms": max(
+                0,
+                config.getint('GEMINI_LIVE', 'echo_tail_ms', fallback=600),
+            ),
+            "session_timeout_seconds": max(
+                0,
+                config.getint(
+                    'GEMINI_LIVE', 'session_timeout_seconds', fallback=540
+                ),
+            ),
+        },
         "CONTROLS": {
             "controller_name": config['CONTROLS']['controller_name'],
             "enabled": config['CONTROLS']['enabled'],
             "voicemovement": config['CONTROLS']['voicemovement'],         
         },
         "STT": {
-            "wake_word": config['STT']['wake_word'],
+            "input_device": config.get('STT', 'input_device', fallback='').strip(),
+            "wake_word": _lang_get('STT', 'wake_word'),
             "sensitivity": config['STT']['sensitivity'],
             "stt_processor": config['STT']['stt_processor'],
             "external_url": config['STT']['external_url'],
-            "whisper_model": config['STT']['whisper_model'],
-            "vosk_model": config['STT']['vosk_model'],
+            "whisper_model": _lang_get('STT', 'whisper_model'),
+            "stt_language": _lang_get('STT', 'stt_language', fallback=language),
+            "vosk_model": _lang_get('STT', 'vosk_model'),
             "use_indicators": config.getboolean('STT', 'use_indicators'),
             "vad_method": config['STT']['vad_method'],
+            "silence_threshold_db": config.get('STT', 'silence_threshold_db', fallback=''),
             "speechdelay": int(config['STT']['speechdelay']),
+            "wake_responses_file": _lang_get(
+                'STT', 'wake_responses_file', fallback='character/TARS/wake_responses_en.txt'
+            ),
+            "wake_prerecorded": _lang_get('STT', 'wake_prerecorded', fallback='false'),
+            "wake_audio_dir": _lang_get('STT', 'wake_audio_dir', fallback=''),
+            "wake_audio_by_index": _lang_get('STT', 'wake_audio_by_index', fallback='false'),
+            "listen_silent_frames": int(config.get('STT', 'listen_silent_frames', fallback='50')),
+            "end_speech_silent_frames": int(
+                config.get('STT', 'end_speech_silent_frames', fallback='8')
+            ),
+            "max_empty_listen_attempts": int(
+                config.get('STT', 'max_empty_listen_attempts', fallback='3')
+            ),
+            "whisper_timeout_sec": int(config.get('STT', 'whisper_timeout_sec', fallback='45')),
+            "stt_debug": config.get('STT', 'stt_debug', fallback='true'),
+            "max_recording_frames": int(config.get('STT', 'max_recording_frames', fallback='100')),
         },
         "CHAR": {
-            "character_card_path": config['CHAR']['character_card_path'],
-            "user_name": config['CHAR']['user_name'],
-            "user_details": config['CHAR']['user_details'],
+            "language": language,
+            "character_card_path": _lang_get('CHAR', 'character_card_path'),
+            "user_name": _lang_get('CHAR', 'user_name'),
+            "user_details": _lang_get('CHAR', 'user_details'),
             "traits": persona_traits,  # Include the traits from persona.ini
         },
         "LLM": {
@@ -170,8 +305,9 @@ def load_config():
             "temperature": float(config['LLM']['temperature']),
             "top_p": float(config['LLM']['top_p']),
             "seed": int(config['LLM']['seed']),
-            "systemprompt": config['LLM']['systemprompt'],
-            "instructionprompt": config['LLM']['instructionprompt'],
+            "systemprompt": _lang_get('LLM', 'systemprompt'),
+            "instructionprompt": _lang_get('LLM', 'instructionprompt'),
+            "reasoning_effort": config.get('LLM', 'reasoning_effort', fallback=''),
         },
         "VISION": {
             "server_hosted": config.getboolean('VISION', 'server_hosted'),
@@ -183,15 +319,19 @@ def load_config():
             "storepath": os.path.join(os.getcwd(), config['EMOTION']['storepath']),
         },
         "TTS": TTSConfig.from_config_dict({
-            "ttsoption": config['TTS']['ttsoption'],
+            "ttsoption": _lang_get('TTS', 'ttsoption'),
             "azure_api_key": os.getenv('AZURE_API_KEY'),
             "elevenlabs_api_key": os.getenv('ELEVENLABS_API_KEY'),
+            "fishaudio_api_key": os.getenv('FISH_AUDIO_API_KEY'),
             "azure_region": config['TTS']['azure_region'],
             "ttsurl": config['TTS']['ttsurl'],
             "toggle_charvoice": config.getboolean('TTS', 'toggle_charvoice'),
-            "tts_voice": config['TTS']['tts_voice'],
+            "tts_voice": _lang_get('TTS', 'tts_voice'),
             "voice_id": config['TTS']['voice_id'],
             "model_id": config['TTS']['model_id'],
+            "fishaudio_reference_id": config.get('TTS', 'fishaudio_reference_id', fallback=''),
+            "fishaudio_model": config.get('TTS', 'fishaudio_model', fallback='s2.1-pro-free'),
+            "fishaudio_format": config.get('TTS', 'fishaudio_format', fallback='mp3'),
             "voice_only": config.getboolean('TTS', 'voice_only'),
             "is_talking_override": config.getboolean('TTS', 'is_talking_override'),
             "is_talking": config.getboolean('TTS', 'is_talking'),
@@ -208,11 +348,35 @@ def load_config():
         "HOME_ASSISTANT": {
             "enabled": config['HOME_ASSISTANT']['enabled'],
             "url": config['HOME_ASSISTANT']['url'],
+            "ha_skip_llm": config.get('HOME_ASSISTANT', 'ha_skip_llm', fallback='true'),
             "HA_TOKEN": os.getenv('HA_TOKEN'),
+        },
+        "MQTT": {  
+            "enabled": config.get('MQTT', 'enabled', fallback='False'),
+            "host": config.get('MQTT', 'host', fallback='192.168.219.164'),
+            "port": config.get('MQTT', 'port', fallback='1883'),
+            "username": config.get('MQTT', 'username', fallback=''),
+            "password": config.get('MQTT', 'password', fallback=''),
+            "topic_voice": config.get('MQTT', 'topic_voice', fallback='tars/voice/alert'),
+            "client_id": config.get('MQTT', 'client_id', fallback='tars_robot'),
+        },
+        "VOLUME": {
+            # amixer simple-control name. USB DACs often expose 'PCM' instead of 'Master'.
+            "control": config.get('VOLUME', 'control', fallback='Master'),
+            # ALSA card index/name for `amixer -c <card>`. Empty = default card.
+            "card": config.get('VOLUME', 'card', fallback=''),
+        },
+        "WEATHER": {
+            "latitude": config.get('WEATHER', 'latitude', fallback='37.447'),
+            "longitude": config.get('WEATHER', 'longitude', fallback='126.731'),
+            "location_name": config.get('WEATHER', 'location_name', fallback='인천 남동구'),
+            "timezone": config.get('WEATHER', 'timezone', fallback='Asia/Seoul'),
+            "forecast_days": config.get('WEATHER', 'forecast_days', fallback='7'),
         },
         "DISCORD": {
             "TOKEN": os.getenv('DISCORD_TOKEN'),
             "channel_id": config['DISCORD']['channel_id'],
+            "require_mention": config.get('DISCORD', 'require_mention', fallback='True'),
             "enabled": config['DISCORD']['enabled'],
         },
         "SERVO": {

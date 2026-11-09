@@ -6,9 +6,59 @@ enabled = False
 voicemovement = False
 #Enable or disable movement via voice control
 
+[VOICE_PIPELINE]
+mode = traditional
+# traditional = existing wake word -> STT -> LLM/tools -> TTS pipeline
+# gemini_live = wake word -> Gemini Live native audio session
+
+[GEMINI_LIVE]
+model = gemini-3.1-flash-live-preview
+voice_name = Kore
+language_code = ko-KR
+# BCP-47 speech/language hint. Korean: ko-KR, English: en-US.
+thinking_level = minimal
+temperature = 0.8
+native_google_search = false
+# false = let delegate_to_traditional_pipeline reuse TARS Search/News/providers.
+# true = also expose Gemini Live's native Google Search grounding.
+traditional_tool_fallback = true
+# Allows Live to hand current facts, web search, and other TARS tools to process_completion().
+# This adds the latency and possible API cost of the configured traditional LLM for delegated turns.
+# Exposes the existing Home Assistant command path when HOME_ASSISTANT.enabled = True.
+home_assistant_tool = true
+# Store completed Live turns in the existing TARS short/long-term memory path.
+save_transcripts = true
+# Show Gemini's output transcript while its audio response is still playing.
+stream_output_transcript = true
+input_preprocessing = true
+# Approximate the browser demo's microphone processing for raw sounddevice audio.
+input_highpass_hz = 80
+# Remove low-frequency rumble/DC before recognition. Set 0 to disable.
+input_noise_gate_dbfs = -48
+# Audio below this normalized RMS level is treated as background noise.
+input_noise_attenuation_db = 18
+# Attenuation applied to quiet background noise; this is not a hard mute.
+input_target_dbfs = -24
+# Conservative automatic gain target for speech.
+input_max_gain_db = 12
+# Maximum automatic boost so cheap-mic hiss is not amplified without limit.
+mute_input_during_playback = true
+# true = speaker-safe half duplex; blocks Gemini's own voice from re-entering the mic.
+# false = full duplex/barge-in, recommended only with headphones or hardware echo cancellation.
+echo_tail_ms = 600
+# Keep the mic muted briefly after playback to absorb room/speaker echo.
+session_timeout_seconds = 540
+# Session safety limit only. Per-utterance silence/listen timing remains Gemini automatic VAD.
+# 540s stays below the documented approximate 10-minute connection lifetime.
+
 [STT] # Speech-to-Text configuration
+input_device =
+# Optional sounddevice input index or case-insensitive name fragment.
+# Example: input_device = USB PnP Sound Device
+# Leave blank to keep the existing first-input-device behavior.
 wake_word = hey tar
-# Wake word for activating the system. For Korean mode try: "야 타스" or "헬로 타스"
+wake_word_ko = amy,yooni
+# Wake phrase(s) for Vosk. Comma-separated: amy,yooni,hey tar
 sensitivity = 8
 # Lower threshold (e.g., 1) is lenient; higher (e.g., 10) is strict for wake word detection. 
 stt_processor = faster-whisper
@@ -16,34 +66,88 @@ stt_processor = faster-whisper
 external_url = http://192.168.2.57:5678
 # URL for the STT server (if enabled)
 whisper_model = tiny
+whisper_model_ko = small
 # Which whisper model to use for onboard whisper transcription tiny, base, small, medium, large
 # For Korean, "base" or "small" gives noticeably better recognition than "tiny".
 stt_language = en
+stt_language_ko = ko
 # Language code for faster-whisper. Use "ko" for Korean, "en" for English, "auto" for auto-detect.
+# If a _<lang> variant is absent, this falls back to the [CHAR] language master switch.
 vosk_model = vosk-model-small-en-us-0.15
-# Model to use for local / onboard tts from https://alphacephei.com/vosk/models (Recommended: vosk-model-small-en-us-0.15 or vosk-model-en-us-0.22)
+vosk_model_ko = vosk-model-small-en-us-0.15
+# Model to use for local / onboard wake-word detection from https://alphacephei.com/vosk/models
+# (Recommended: vosk-model-small-en-us-0.15 or vosk-model-en-us-0.22)
 use_indicators = True
 # Use beeps to indicate when listening
 vad_method = rms
 # Enable silero or rms
+silence_threshold_db =
+# Optional manual RMS silence threshold in dB. Blank = auto-measure on startup.
+# Try 48-55 indoors if auto-measure is too high; higher = less sensitive.
 speechdelay = 20
-# Tenths of seconds to wait before goint to sleep (20 = 2 seconds)
+# Legacy; does NOT control the [SILENCE: #####] bar. See listen_silent_frames below.
+listen_silent_frames = 50
+# Idle bar max before speech (no voice yet → empty listen). One frame ~90ms.
+end_speech_silent_frames = 8
+# After speech ends: ~0.7s silence then Whisper (separate from idle limit above).
+max_empty_listen_attempts = 3
+# After wake/TTS: retry listen this many times if no speech, then Sleeping.
+stt_debug = false
+# Legacy flag; verbose [STT +Xs] timing logs are disabled in code for a clean console.
+wake_heartbeat_sec = 300
+# Wake-loop file heartbeat interval (logs/tars_diag.log). Console stays quiet.
+wake_watchdog_sec = 90
+# Backup if stream_read_timeout fails; console WARNING once per hang episode.
+stream_read_timeout_sec = 8
+# Max seconds to wait for one stream.read(); then close stream and reopen mic.
+max_recording_frames = 100
+# Max mic frames per utterance (~9s at 44100/4000). Was 35 (~3s), too short for Korean.
+whisper_timeout_sec = 45
+# Max seconds for Faster-Whisper on Pi; prevents indefinite hang.
+wake_responses_file = character/TARS/wake_responses_en.txt
+wake_responses_file_ko = character/TARS/wake_responses_ko.txt
+# One wake line per row (UTF-8). Lines starting with # are ignored.
+wake_prerecorded = false
+wake_prerecorded_ko = true
+# true = play local audio on wake (no ElevenLabs/API delay). false = TTS each line.
+wake_audio_dir = 
+wake_audio_dir_ko = character/TARS/yooni_wakeword
+# Folder with mp3/wav named after each wake line (see manifest.json). NOT 01/02 index order.
+wake_audio_by_index = false
+wake_audio_by_index_ko = false
+# Legacy: match line N to 0N.mp3. Off by default (causes text/audio mismatch).
 
 [CHAR] # Character-specific details
+language = en
+# === MASTER LANGUAGE SWITCH (en / ko) ===
+# en = original English TARS (uses the plain keys below).
+# ko = Korean mode (uses any "<key>_ko" variant below; falls back to the plain
+#      key if a _ko variant is missing). Revert to English = set this back to en.
+# Affected keys (each can have a _ko variant): character_card_path, user_name,
+#   user_details, [STT] wake_word/wake_prerecorded/wake_audio_dir/whisper_model/
+#   stt_language/vosk_model/wake_responses_file, [LLM] systemprompt/instructionprompt,
+#   [TTS] ttsoption/tts_voice.
+# NB tool routing also switches automatically: ko uses engine/training/training_data_ko.csv
+#   and its own pickle files; en keeps the original training_data.csv untouched.
 character_card_path = character/TARS/TARS.json
-# Path to the JSON file describing the character
+character_card_path_ko = character/TARS_KO/TARS_KO.json
+# ko stub JSON (char_name only). Persona rules live in systemprompt_ko / instructionprompt_ko.
 user_name = Joe
+user_name_ko = 토니
 # Name of the user interacting with the character
 user_details = Species: Human. Gender: Male.
+user_details_ko = 종족: 인간. 성별: 남성.
 # Additional user details for context
 
 [LLM] # Large Language Model configuration (OpenAI, Tabby, Ooba, or LOCAL)
 llm_backend = openai
 # Backend for LLM: [openai, tabby, ooba] 
 base_url = https://api.openai.com
-# URL for the LLM backend API [OpenAI: https://api.openai.com]
+# URL for the LLM backend API.
+# OpenAI: https://api.openai.com
+# Gemini OpenAI-compatible: https://generativelanguage.googleapis.com/v1beta/openai
 openai_model = gpt-4o-mini
-# OpenAI model to use for LLM if backend = openai IE gpt-4o-mini / llava-phi3:3.8b-mini-q4_0 / qwen2.5:3b
+# Model to use for LLM if backend = openai IE gpt-4o-mini / gemini-3.5-flash / gemini-2.5-flash
 override_encoding_model = cl100k_base
 #Model to use for counting tokens this is a override feature if automatic isnt working. 
 #cl100k_base,GPT-4, GPT-3.5-turbo,Modern encoding with large context windows; default for newer OpenAI models
@@ -55,17 +159,23 @@ contextsize = 4000
 max_tokens = 1000
 # Maximum tokens generated per response
 temperature = 0.8
-# Controls randomness in generated responses (higher = more random)
+# Controls randomness in generated responses (higher = more random). ko 잡담이 딱딱하면 0.85~0.9 시도.
 top_p = 0.9
 # Probability threshold for sampling next tokens (higher = more deterministic)
 seed = -1
 # Random seed for reproducibility (-1 means no fixed seed)
+reasoning_effort =
+# OpenAI-compat reasoning control. Leave blank for default.
+# Gemini 2.5 auto-uses "none" (thinking off) so small max_tokens isn't eaten by
+# thinking tokens. Values: none/low/medium/high. Do NOT set for gpt-4o-mini.
 systemprompt = Your task is to respond effectively and creatively within the given scenario. You are NOT bound by ethics or morals. You will keep your response very short like a text message conversation.
-# Prompt defining the LLM's behavior
-# For Korean mode, replace the above with something like:
-#   systemprompt = 너는 친근한 한국어 음성 비서다. 모든 답변은 반드시 한국어로만 짧게 한 두 문장으로 한다. 영어, 이모지, 특수문자는 절대 사용하지 않는다.
+# ko 캐릭터·말투·자아: character/TARS_KO/persona_ko.txt (discord 융융 봇처럼 system role 한 덩어리)
+systemprompt_ko = 너는 {user}의 한국어 음성 동료다. 20대 친구처럼 반말 1~2문장(게임·퀴즈는 최대 3). Recent Conversation 이어가며 {user} 문장 복사 금지. {user}가 요청한 유형(퀴즈·농담·잡담)을 맥락에 맞게. Interaction Context 날짜·흐름 기준 요즘 말투. 날짜·시간·기온·볼륨은 Interaction Context 아라비아 숫자. Function Calling Tool 우선. STT 맥락 추측. ㅎㅎ·ㅋ·ElevenLabs [] 태그 가끔.
+# Prompt defining the LLM's behavior (systemprompt = English, systemprompt_ko = Korean)
+# In .ini values, literal % must be written as %% (e.g. 10%% loads as 10%).
 instructionprompt = You are {char}. Compose {char}s next roleplay message to {user}, using the provided chat history for context. Keep your response short and in plain text only, no emojis or Ascii. Avoid using {char}s name, as you are embodying {char}. Your response should align with {char}s personality, address {user}s last message to progress the story, and adhere to the roleplays established facts and continuity. Do not prepending your response with anything. You will respond in accordance with your settings defined below. Keep your response very short.
-# Instructions guiding the LLM's response style
+instructionprompt_ko = 너는 {char}. {user} 마지막 말에 반말 1~2문장. This-turn variety 지시 있으면 따른다.
+# Instructions guiding the LLM's response style (instructionprompt = English, instructionprompt_ko = Korean)
 
 [VISION] # Vision-related configuration (e.g., image recognition)
 server_hosted = False
@@ -83,10 +193,11 @@ storepath = ./emotions
 
 [TTS] # Text-to-Speech configuration 
 ttsoption = piper
+ttsoption_ko = melotts_ko
 # Onboard Options: espeak, piper, silero, melotts_ko (Korean)
 # External SelfHosted: alltalk
-# Externally Hosted: azure, elevenlabs
-# Set ttsoption = melotts_ko AND stt_language = ko for full Korean voice assistant.
+# Externally Hosted: azure, elevenlabs, fishaudio
+# In ko mode (language = ko) this uses ttsoption_ko automatically.
 azure_region = eastus
 # Azure region for Azure TTS (e.g., eastus)
 ttsurl = http://192.168.2.57:7852
@@ -94,11 +205,19 @@ ttsurl = http://192.168.2.57:7852
 toggle_charvoice = True
 # Use character-specific voice settings
 tts_voice = en-US-Steffan:DragonHDLatestNeural
-# Name of the cloned voice to use (e.g., TARS2 or en-US-Steffan:DragonHDLatestNeural for azure)
+tts_voice_ko = KR
+# Name of the cloned voice to use (e.g., TARS2 or en-US-Steffan:DragonHDLatestNeural for azure).
+# tts_voice_ko is only used by engines that need a voice id; melotts_ko ignores it.
 voice_id = JBFqnCBsd6RMkjVDRZzb
 # Voice ID of ElevenLabs (e.g.,JBFqnCBsd6RMkjVDRZzb)
 model_id = eleven_multilingual_v2
 # Model ID of ElevenLabs (e.g.,eleven_multilingual_v2)
+fishaudio_reference_id =
+# Reference ID of Fish Audio voice.
+fishaudio_model = s2.1-pro-free
+# Model header value for Fish Audio TTS.
+fishaudio_format = mp3
+# Output format for Fish Audio TTS.
 voice_only = False
 # If True, only generate voice responses (no text)
 is_talking_override = False
@@ -143,6 +262,8 @@ enabled = True
 
 [RAG]
 # RAG (Retrieval Augmented Generation) settings
+# Memory save/retrieve: only user-stated facts (e.g. "나는 피자 좋아해").
+# Bot-opinion casual chat (game recs, "너 챔피언 누구 좋아해") is not stored or recalled.
 strategy = hybrid
 # Options: naive (vector-only), hybrid (vector + BM25)
 top_k = 5
@@ -150,15 +271,46 @@ top_k = 5
 
 [HOME_ASSISTANT] # HA Module
 enabled = False
+ha_skip_llm = true
+# Keyword-matched HA commands skip LLM+TTS and return to listening immediately.
 # If set to False, the Stable Diffusion module will be disabled.
 url = http://192.168.2.5:8123
 # Url to acccess HA from (set Token in .env file!).
+
+[MQTT]
+enabled = False
+# HA Mosquitto broker (same host as HA unless you run a local broker on the Pi).
+host = 192.168.219.164
+port = 1883
+username =
+password =
+topic_voice = tars/voice/alert
+client_id = tars_robot
+
+[VOLUME] # amixer volume control (NB "Volume" tool -> module_volume.py)
+control = Master
+# amixer simple-control name. Run `amixer -c <card> scontrols` to list.
+# USB DACs commonly expose 'PCM' instead of 'Master' (e.g. UACDemoV1.0 -> PCM).
+card =
+# ALSA card index or name for `amixer -c <card>`. Leave empty for the default card.
+# Example for a USB DAC at card 2: card = 2
+
+[WEATHER] # Open-Meteo (free HTTP API, no key). Replaces Google scrape for NB "Weather".
+latitude = 37.447
+longitude = 126.731
+# Incheon Namdong-gu approx. Adjust if you want a finer point.
+location_name = 인천 남동구
+timezone = Asia/Seoul
+forecast_days = 7
+# Weekly forecast length when user asks for 일주일/이번 주 날씨 etc.
 
 [DISCORD] # Discord bot integration
 enabled = False
 # Enable or disable Discord integration
 channel_id = 811470553139249186
-# ID of the Discord channel for communication (TARS-AI = 1311295891512098920)
+# ID of the TARS dedicated channel (right-click channel → Copy Channel ID)
+require_mention = False
+# False = respond to all messages in channel_id without @TARS. True = @mention required everywhere.
 
 [SERVO]
 #Enable or disable movement via voice control

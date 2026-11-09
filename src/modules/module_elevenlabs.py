@@ -1,5 +1,4 @@
 import io
-import re
 import asyncio
 import wave
 from modules.module_config import load_config
@@ -55,17 +54,17 @@ async def synthesize_elevenlabs(chunk):
 
 async def text_to_speech_with_pipelining_elevenlabs(text):
     """
-    Converts text to speech using the ElevenLabs API and streams audio as it's generated.
+    Converts text to speech using the ElevenLabs API.
 
     Yields:
-    - BytesIO: Processed audio chunks as they're generated.
+    - BytesIO: Processed audio buffer.
     """
-    # ✅ Split text into sentences before sending to ElevenLabs
-    chunks = re.split(r'(?<=\.)\s', text)  # Split at sentence boundaries
+    text = text.strip()
+    if not text:
+        return
 
-    # ✅ Process each sentence separately
-    for chunk in chunks:
-        if chunk.strip():  # ✅ Ignore empty chunks
-            wav_buffer = await synthesize_elevenlabs(chunk.strip())  # ✅ Generate audio
-            if wav_buffer:
-                yield wav_buffer  # ✅ Stream audio chunks dynamically
+    # Send the full response at once so ElevenLabs emotion tags stay attached to
+    # their sentence instead of being synthesized as separate words.
+    wav_buffer = await synthesize_elevenlabs(text)
+    if wav_buffer:
+        yield wav_buffer

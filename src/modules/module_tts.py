@@ -11,6 +11,7 @@ Handles TTS functionality to convert text into audio using:
 """
 
 # === Standard Libraries ===
+import re
 import requests
 import os 
 from datetime import datetime
@@ -19,6 +20,7 @@ import sounddevice as sd
 import soundfile as sf
 from io import BytesIO
 import asyncio
+import librosa
 
 from modules.module_piper import text_to_speech_with_pipelining_piper
 from modules.module_silero import text_to_speech_with_pipelining_silero
@@ -26,12 +28,101 @@ from modules.module_espeak import text_to_speech_with_pipelining_espeak
 from modules.module_alltalk import text_to_speech_with_pipelining_alltalk
 from modules.module_elevenlabs import text_to_speech_with_pipelining_elevenlabs
 from modules.module_azure import text_to_speech_with_pipelining_azure
+# Fish Audio is optional, so absent httpx does not break other TTS engines.
+try:
+    from modules.module_fishaudio import text_to_speech_with_pipelining_fishaudio
+except Exception:
+    text_to_speech_with_pipelining_fishaudio = None
 # Korean MeloTTS is optional — imported lazily so absent installs don't break other engines.
 try:
     from modules.module_melotts import text_to_speech_with_pipelining_melotts
 except Exception:
     text_to_speech_with_pipelining_melotts = None
 from modules.module_messageQue import queue_message
+from modules.module_elevenlabs_tags import strip_elevenlabs_tags
+
+
+def polish_ko_reply(text: str, last_bot: str = "") -> str:
+    """Spoken-style cleanup + break consecutive [smug] / identical openings."""
+    if not text:
+        return text
+    stripped = text.strip()
+    last_bot = (last_bot or "").strip()
+
+    if last_bot and re.match(r"^\[smug\]", stripped, re.IGNORECASE):
+        if re.match(r"^\[smug\]", last_bot, re.IGNORECASE):
+            stripped = re.sub(
+                r"^\[smug\]\s*",
+                "[mocking] ",
+                stripped,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
+    stripped = re.sub(r'(?<![0-9])\.(?=\s|$)', '~', stripped)
+    stripped = re.sub(r'~{2,}', '~', stripped)
+    return re.sub(r'\s+', ' ', stripped).strip()
+
+
+_HOUR_KO = (None, '한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열한', '열두')
+_SINO = ('', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구')
+
+
+def _ko_sino_number(value: int) -> str:
+    if value == 0:
+        return '영'
+    if value < 10:
+        return _SINO[value]
+    if value < 100:
+        tens, ones = divmod(value, 10)
+        text = '십' if tens == 1 else _SINO[tens] + '십'
+        if ones:
+            text += _SINO[ones]
+        return text
+    if value < 1000:
+        hundreds, rest = divmod(value, 100)
+        text = _SINO[hundreds] + '백' if hundreds > 1 else '백'
+        if rest:
+            text += _ko_sino_number(rest)
+        return text
+    return str(value)
+
+
+def _ko_minute(minute: int) -> str:
+    if minute == 0:
+        return ''
+    return _ko_sino_number(minute) + '분'
+
+
+def _ko_spoken_time(hour: int, minute: int) -> str:
+    period = '오전' if hour < 12 else '오후'
+    hour12 = hour % 12 or 12
+    spoken = f"{period} {_HOUR_KO[hour12]}시"
+    if minute:
+        spoken = f"{spoken} {_ko_minute(minute)}"
+    return spoken
+
+
+def normalize_for_korean_tts(text: str) -> str:
+    """Convert numeric time/temp/percent in display text to spoken Korean for TTS only."""
+    if not text:
+        return text
+
+    def replace_time_hm(match):
+        return _ko_spoken_time(int(match.group(1)), int(match.group(2)))
+
+    def replace_time_colon(match):
+        return _ko_spoken_time(int(match.group(1)), int(match.group(2)))
+
+    def replace_hour_only(match):
+        return _ko_spoken_time(int(match.group(1)), 0)
+
+    text = re.sub(r'(\d{1,2})시\s*(\d{1,2})분', replace_time_hm, text)
+    text = re.sub(r'(?<!\d)(\d{1,2}):(\d{2})(?!\d)', replace_time_colon, text)
+    text = re.sub(r'(\d{1,2})시(?![\d분])', replace_hour_only, text)
+    text = re.sub(r'(\d+)도\b', lambda m: _ko_sino_number(int(m.group(1))) + '도', text)
+    text = re.sub(r'(\d+)\s*%', lambda m: _ko_sino_number(int(m.group(1))) + '퍼센트', text)
+    return text
 
 def update_tts_settings(ttsurl):
     """
@@ -67,7 +158,7 @@ def update_tts_settings(ttsurl):
     except Exception as e:
         queue_message(f"ERROR: TTS update failed: {e}")
 
-def play_audio_stream(tts_stream, samplerate=22050, channels=1, gain=1.0, normalize=False):
+def play_audio_stream(tts_stream, samplerate=48000, channels=1, gain=1.0, normalize=False):
     """
     Play the audio stream through speakers using SoundDevice with volume/gain adjustment.
     
@@ -102,7 +193,8 @@ def play_audio_stream(tts_stream, samplerate=22050, channels=1, gain=1.0, normal
         queue_message(f"ERROR: Error during audio playback: {e}")
 
 
-async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=None, ttsurl=None, toggle_charvoice=True, tts_voice=None):
+# async def generate_tts_audio(text, config):
+async def generate_tts_audio(text, config, azure_api_key=None, azure_region=None, ttsurl=None, toggle_charvoice=True, tts_voice=None):
     """
     Generate TTS audio for the given text using the specified TTS system.
 
@@ -113,6 +205,21 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
     - toggle_charvoice (bool): Flag indicating whether to use character voice for TTS.
     - tts_voice (str): The TTS speaker/voice configuration.
     """
+    if hasattr(config, "ttsoption"):
+        # config가 객체인 경우
+        ttsoption = config.ttsoption
+        tts_voice = config.tts_voice
+        ttsurl = config.ttsurl
+        voice_id = config.voice_id
+        model_id = config.model_id
+    else:
+        # 문자열만 넘겨졌을 경우
+        ttsoption = config
+        tts_voice = None
+        ttsurl = None
+        voice_id = None
+        model_id = None
+
     try:
         # Azure TTS generation
         if ttsoption == "azure":
@@ -122,6 +229,7 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
         # Local TTS generation using `espeak-ng`
         elif ttsoption == "espeak":
             async for chunk in text_to_speech_with_pipelining_espeak(text):
+                print(f"chunk type : {type(chunk)}")
                 yield chunk
 
         elif ttsoption == "alltalk":
@@ -147,6 +255,15 @@ async def generate_tts_audio(text, ttsoption, azure_api_key=None, azure_region=N
             async for chunk in text_to_speech_with_pipelining_elevenlabs(text):
                 yield chunk
 
+        elif ttsoption == "fishaudio":
+            if text_to_speech_with_pipelining_fishaudio is None:
+                raise RuntimeError(
+                    "fishaudio selected but httpx is not installed. "
+                    "Run: pip install httpx"
+                )
+            async for chunk in text_to_speech_with_pipelining_fishaudio(text):
+                yield chunk
+
         elif ttsoption == "silero":
             async for chunk in text_to_speech_with_pipelining_silero(text):
                 yield chunk 
@@ -166,6 +283,31 @@ async def play_audio_chunks(text, config):
             # Read the audio chunk into a format playable by sounddevice
             data, samplerate = sf.read(audio_chunk, dtype='float32')
             sd.play(data, samplerate)
-            await asyncio.sleep(len(data) / samplerate)  # Wait for playback to finish
+            sd.wait()
+            await asyncio.sleep(0.05)
         except Exception as e:
             queue_message(f"ERROR: Failed to play audio chunk: {e}")
+
+
+def play_audio_file(path):
+    """Play a local audio file (wake clips). No network/TTS API call."""
+    try:
+        data, file_sr = sf.read(path, dtype='float32')
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+
+        out_device = sd.default.device[1]
+        if out_device is None or int(out_device) < 0:
+            out_device = sd.default.device[0]
+        out_info = sd.query_devices(out_device)
+        target_sr = int(out_info['default_samplerate'])
+
+        if int(file_sr) != target_sr:
+            data = librosa.resample(y=data, orig_sr=file_sr, target_sr=target_sr)
+            file_sr = target_sr
+
+        sd.play(data, int(file_sr), device=out_device)
+        sd.wait()
+    except Exception as e:
+        queue_message(f"ERROR: Failed to play audio file {path}: {e}")
+

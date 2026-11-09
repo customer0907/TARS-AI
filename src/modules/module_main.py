@@ -21,7 +21,8 @@ from modules.module_config import load_config
 from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
-from modules.module_tts import play_audio_chunks
+from modules.module_tts import play_audio_chunks, play_audio_file, strip_elevenlabs_tags, normalize_for_korean_tts
+from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
 # === Constants and Globals ===
@@ -34,6 +35,13 @@ CONFIG = load_config()
 # Global Variables (if needed)
 stop_event = threading.Event()
 executor = concurrent.futures.ProcessPoolExecutor(max_workers=4)
+
+
+def strip_speaker_prefix(text):
+    """Remove leading display speaker labels before sending text to TTS."""
+    if not text:
+        return text
+    return re.sub(r'^\s*(?:TARS|타스)\s*:\s*', '', text, flags=re.IGNORECASE).strip()
 
 # === Threads ===
 def start_bt_controller_thread():
@@ -48,47 +56,53 @@ def start_bt_controller_thread():
         queue_message(f"ERROR: {e}")
 
 # === Callback Functions ===
-def process_discord_message_callback(user_message):
+def process_discord_message_callback(user_message, bot_user_id=None):
     """
     Processes the user's message and generates a response.
 
     Parameters:
     - user_message (str): The message content sent by the user.
+    - bot_user_id (int): Discord bot user ID for stripping the @mention prefix.
 
     Returns:
     - str: The bot's response.
     """
+    reply = "뭐?"
     try:
-        # Parse the user message
-        #queue_message(user_message)
+        if bot_user_id:
+            message_content = re.sub(rf"<@!?{bot_user_id}>\s*", "", user_message).strip()
+        else:
+            match = re.match(r"<@!?(\d+)> ?(.*)", user_message)
+            message_content = match.group(2).strip() if match else user_message.strip()
 
-        match = re.match(r"<@(\d+)> ?(.*)", user_message)
+        if not message_content:
+            return "응?"
 
-        if match:
-            mentioned_user_id = match.group(1)  # Extracted user ID
-            message_content = match.group(2).strip()  # Extracted message content (trim leading/trailing spaces)
-
-        #stream_text_nonblocking(f"{mentioned_user_id}: {message_content}")
-        #queue_message(message_content)
-
-        # Process the message using process_completion
-        reply = process_completion(message_content)  # Process the message
-
-        #queue_message(f"TARS: {reply}")
-        #stream_text_nonblocking(f"TARS: {reply}")
-        
+        reply = process_completion(message_content)
     except Exception as e:
-        queue_message(f"ERROR: {e}")
+        queue_message(f"ERROR: Discord callback: {e}")
 
     return reply
 
 def wake_word_callback(wake_response):
     """
-    Play initial response when wake word is detected.
+    Play wake response immediately. Uses pre-recorded audio when available (no API latency).
+    """
+    if CONFIG.get('VOICE_PIPELINE', {}).get('mode') == 'gemini_live':
+        # Avoid playing TTS/prerecorded audio over the Live session's first mic frames.
+        return
 
-    Parameters:
-    - wake_response (str): The response to the wake word.
-    """ 
+    if isinstance(wake_response, dict):
+        text = wake_response.get('text', '')
+        audio_path = wake_response.get('audio_path')
+        if audio_path and os.path.isfile(audio_path):
+            play_audio_file(audio_path)
+            return
+        if text:
+            asyncio.run(play_audio_chunks(text, CONFIG['TTS']['ttsoption']))
+            return
+        return
+
     asyncio.run(play_audio_chunks(wake_response, CONFIG['TTS']['ttsoption']))
 
 def utterance_callback(message):
@@ -107,42 +121,60 @@ def utterance_callback(message):
         
         #Print or stream the response
         #queue_message(f"USER: {message_dict['text']}")
-        queue_message(f"USER: {message_dict['text']}", stream=True) 
+        queue_message(f"USER: {message_dict['text']}")
 
         # Check for shutdown command
         if "shutdown pc" in message_dict['text'].lower():
             queue_message(f"SHUTDOWN: Shutting down the PC...")
             os.system('shutdown /s /t 0')
             return  # Exit function after issuing shutdown command
-        
-        # Process the message using process_completion
-        reply = process_completion(message_dict['text'])  # Process the message
 
-        # Extract the <think> block if present
+        user_text = message_dict['text']
+        ha_cfg = CONFIG.get('HOME_ASSISTANT', {})
+        ha_skip_llm = str(ha_cfg.get('ha_skip_llm', 'true')).lower() in ('true', '1', 'yes')
+        if (
+            ha_cfg.get('enabled') == "True"
+            and ha_skip_llm
+            and map_prompt_to_ha_service(user_text)
+        ):
+            try:
+                send_prompt_to_homeassistant(user_text)
+            except Exception as e:
+                queue_message(f"ERROR: HA shortcut failed: {e}")
+            else:
+                if stt_manager:
+                    stt_manager._release_audio_input(pause=0.05)
+                return
+            # HA failed → fall through to LLM
+
+        reply = process_completion(user_text)
+
         try:
             match = re.search(r"<think>(.*?)</think>", reply, re.DOTALL)
             thoughts = match.group(1).strip() if match else ""
-            
-            # Remove the <think> block and clean up trailing whitespace/newlines
             reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
         except Exception:
             thoughts = ""
 
-        # Debug output for thoughts
         if thoughts:
-            #queue_message(f"DEBUG: Thoughts\n{thoughts}")
             pass
 
-        # Stream the AI's reply
-        queue_message(f"TARS: {reply}", stream=True) 
+        reply_for_voice = strip_speaker_prefix(reply)
+        queue_message(f"TARS: {strip_elevenlabs_tags(reply_for_voice)}")
 
-        # Strip emoji and other symbols, but KEEP letters/digits/punct of any script.
-        # \w covers Unicode word chars (incl. Korean Hangul, CJK, accents...).
-        # Previous version was ASCII-only and would erase Korean entirely.
-        reply = re.sub(r'[^\w\s.,?!;:"\'\-。、，·…]', '', reply, flags=re.UNICODE)
+        tts_text = reply_for_voice
+        if CONFIG['CHAR'].get('language') == 'ko':
+            tts_text = normalize_for_korean_tts(tts_text)
+        if CONFIG['TTS']['ttsoption'] not in ('elevenlabs', 'fishaudio'):
+            tts_text = re.sub(
+                r'[^\w\s.,?!;:"\'\-。、，·…]', '', tts_text, flags=re.UNICODE
+            )
 
-        # Stream TTS audio to speakers
-        asyncio.run(play_audio_chunks(reply, CONFIG['TTS']['ttsoption']))
+        if stt_manager:
+            stt_manager._release_audio_input(pause=0.05)
+        asyncio.run(play_audio_chunks(tts_text, CONFIG['TTS']))
+        if stt_manager:
+            stt_manager._release_audio_input(pause=0.05)
 
     except json.JSONDecodeError:
         queue_message("ERROR: Invalid JSON format. Could not process user message.")
@@ -155,6 +187,70 @@ def post_utterance_callback():
     """
     global stt_manager
     stt_manager._transcribe_utterance()
+    pass
+
+
+def _gemini_live_traditional_delegate(query):
+    """Reuse the existing prompt, memory, classifier, search, and tool pipeline."""
+    reply = process_completion(query)
+    if not reply:
+        return "기존 TARS 파이프라인에서 응답을 만들지 못했어."
+    reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
+    reply = strip_speaker_prefix(reply)
+    return strip_elevenlabs_tags(reply)
+
+
+def _gemini_live_homeassistant_delegate(command):
+    """Keep Home Assistant validation/execution on the existing code path."""
+    if CONFIG.get('HOME_ASSISTANT', {}).get('enabled') != 'True':
+        return {"error": "Home Assistant is disabled in config.ini."}
+    return send_prompt_to_homeassistant(command)
+
+
+def _remember_gemini_live_turn(user_text, assistant_text, delegated):
+    """Persist direct Live turns without duplicating delegated process_completion turns."""
+    if (
+        delegated
+        or not memory_manager
+        or not CONFIG.get('GEMINI_LIVE', {}).get('save_transcripts', True)
+    ):
+        return
+    memory_manager.add_session_turn(user_text, assistant_text)
+    threading.Thread(
+        target=memory_manager.write_longterm_memory,
+        args=(user_text, assistant_text),
+        name="GeminiLiveMemoryWriter",
+        daemon=True,
+    ).start()
+
+
+def gemini_live_session_callback():
+    """Run one Gemini Live session synchronously inside the STT wake thread."""
+    if CONFIG.get('VOICE_PIPELINE', {}).get('mode') != 'gemini_live':
+        return
+    if not stt_manager:
+        queue_message("ERROR: Gemini Live cannot start before STT initialization.")
+        return
+
+    from modules.module_gemini_live import run_gemini_live_session
+
+    stt_manager._release_audio_input(pause=0.05)
+    try:
+        input_device = stt_manager._get_input_device()
+    except Exception as exc:
+        queue_message(f"WARNING: Gemini Live will use the default microphone: {exc}")
+        input_device = None
+
+    run_gemini_live_session(
+        config=CONFIG,
+        character_manager=character_manager,
+        memory_manager=memory_manager,
+        input_device=input_device,
+        traditional_delegate=_gemini_live_traditional_delegate,
+        homeassistant_delegate=_gemini_live_homeassistant_delegate,
+        turn_callback=_remember_gemini_live_turn,
+        shutdown_event=stt_manager.shutdown_event,
+    )
 
 # === Initialization ===
 def initialize_managers(mem_manager, char_manager, stt_mgr):
