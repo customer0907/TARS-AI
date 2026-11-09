@@ -70,7 +70,7 @@ flowchart LR
 | 운영 | systemd user service, PulseAudio WebRTC AEC | 자동 재시작, 에코 제거 |
 
 ## 5. 내 역할 및 기여
-원본 대비 **커밋 99개** 추가 (2025-07 ~ 2026-11, `git log --author=LEECHANGHEE`)
+원본 대비 추가 작업 (2025-07 ~ 2026-11). 구현은 AI 코딩 에이전트(Cursor·Claude)를 활용하고, 설계·하드웨어 작업·실기기 검증·디버깅은 직접 수행
 - **하드웨어 제작**: 3D 프린팅, 배선, 전원 설계, BoM 작성(v1 757,000원) → [docs/hardware/BOM.md](docs/hardware/BOM.md)
 - **한국어 모드**: 언어 토글, 한국어 의도 분류 라우팅, 한국어 TTS용 숫자·시간 정규화, 프롬프트·페르소나 설계
 - **STT 안정화**: wake 루프 멈춤 수정, ALSA idle 후 USB 마이크 복구, 마이크 read 워치독·타임아웃 재오픈, 대화 턴 간 지연 단축
@@ -92,9 +92,8 @@ flowchart LR
 - 상세 9건: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ## 7. 성과
-- 커밋 99개, 개발 기간 약 1년 7개월(2025-04 ~ 진행 중)
+- 개발 기간 약 1년 7개월(2025-04 ~ 진행 중)
 - 상시 가동 홈서버에서 `tars.service`로 운영 (자동 재시작, USB 오디오 재열거 자동 복구)
-<!-- TODO(사용자 확인): 응답 지연 등 정량 수치 -->
 
 ## 8. 실행 방법
 ```bash
