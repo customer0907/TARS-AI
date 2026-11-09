@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 2025.04 ~ 진행 중 | 개인 (오픈소스 포크) | 하드웨어 제작, 음성·HA 연동 개발, 운영 | 운영 중 |
 
-**Tech** `Python` `Raspberry Pi 5` `Gemini / Gemini Live` `faster-whisper` `ElevenLabs·Fish Audio TTS` `Home Assistant` `MQTT` `PCA9685`
+**Tech** `Python` `Raspberry Pi 5` `Gemini Live` `OpenAI Realtime` `faster-whisper` `ElevenLabs·Fish Audio TTS` `Home Assistant` `MQTT` `PCA9685` `Kotlin (Android)`
 
 > Forked from [TARS-AI-Community/TARS-AI](https://github.com/TARS-AI-Community/TARS-AI) (CC BY-NC 4.0). 원본 README: [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md) · 원작자 표기: [ATTRIBUTION.md](ATTRIBUTION.md)
 
@@ -21,8 +21,12 @@
 - 한국어 모드 — ko/en 토글, 한국어 의도 분류(Naive Bayes), 한국어 페르소나, 사전 녹음 wake 응답
 - 스마트홈 음성 제어 — 조명(MQTT 서보 스위치), LG 에어컨(전원·온도·모드·풍량)을 Home Assistant REST로 제어
 - HA 즉답 경로 — HA 키워드 매칭 성공 시 LLM·TTS를 건너뛰고 바로 실행해 응답 지연 제거
-- Gemini Live 실시간 음성 — 스트리밍 전사 표시, 스피커 에코 재입력 차단
+- 실시간 음성 엔진 2종 — Gemini Live / OpenAI GPT Realtime, "GPT로 바꿔줘"로 전환·목소리 변경, 선택값은 재시작 후에도 유지
+  - 스트리밍 전사 표시, 스피커 에코 재입력 차단, 무음 시 세션 자동 종료
+  - 실시간 함수 호출 11종: 조명·에어컨 제어/조회, 날씨, 현재 시각, 알람 등록·조회·취소·끄기, 엔진·목소리 전환
 - 도구 호출 — 웹 검색(Naver·Brave·Google), 날씨(Open-Meteo), RAG 메모리(사용자가 말한 사실만 저장)
+- Android 폰 브리지 — 밖에서도 폰으로 집 TARS와 대화, 폰 안에서 한국어 웨이크워드 인식(Vosk) → [phone-app/](phone-app/)
+- 알람 데몬 — 음성 앱과 분리된 상주 서비스, 재부팅 후 복원, Gemini TTS로 말로 깨우기 → [alarm-daemon/](alarm-daemon/)
 - 다중 TTS — ElevenLabs v3(감정 태그), Fish Audio, Piper
 - 4족 보행 — PCA9685 + MG996R 서보, 로컬 서보 제어
 
@@ -42,6 +46,10 @@ flowchart LR
   HA --> MQTT["Mosquitto"] --> LIGHT["NodeMCU 서보 전등"]
   HA --> AC["LG ThinQ 에어컨"]
   ENGINE --> SERVO["PCA9685 서보<br/>(보행)"]
+  PHONE["Android 앱<br/>(Vosk 웨이크워드)"] -- "WebSocket + 토큰<br/>(Tailscale)" --> LIVE["Gemini Live /<br/>GPT Realtime"]
+  MIC --> LIVE
+  LIVE --> HA
+  LIVE --> ALARM["알람 데몬<br/>(127.0.0.1:8765)"] --> SPK
 ```
 - 음성 입력 → 의도 분류 → **HA 명령이면 즉시 실행**, 아니면 LLM + 도구 → TTS 출력
 - 스마트홈 쪽 구성(HA·MQTT·Zigbee·전등 펌웨어): [customer0907/home-iot](https://github.com/customer0907/home-iot)
@@ -51,7 +59,8 @@ flowchart LR
 |---|---|---|
 | 하드웨어 | Raspberry Pi 5, PCA9685, MG996R/SG90, OV5647, 3.5" LCD | 원작 설계 호환, I2C 다채널 서보 제어 |
 | 음성 입력 | faster-whisper (ko: small), wake word | 로컬 STT로 비용·지연 절감 |
-| LLM | Gemini (OpenAI 호환 엔드포인트), Gemini Live | 한국어 품질, 실시간 음성 세션 |
+| LLM | Gemini (OpenAI 호환 엔드포인트), Gemini Live, OpenAI Realtime | 한국어 품질, 실시간 음성 세션, 엔진 비교·전환 |
+| 모바일 | Kotlin, Foreground Service, VoiceInteractionService, Vosk | 측면 버튼 호출, 기기 내 웨이크워드(오디오 외부 전송 없음) |
 | TTS | ElevenLabs v3, Fish Audio, Piper | 감정 표현(태그) / 한국어 음색 / 오프라인 |
 | 스마트홈 | Home Assistant REST, MQTT | 기기 제어를 HA로 일원화 |
 | 운영 | systemd user service, PulseAudio WebRTC AEC | 자동 재시작, 에코 제거 |
@@ -64,6 +73,9 @@ flowchart LR
 - **HA 연동**: 한국어 STT 오인식에 강한 점수 기반 정규식 의도 엔진, HA 즉답 경로, 에어컨 제어, MQTT 음성 알림
 - **LLM·도구**: Gemini 전환, Gemini Live 모듈(에코 차단·실시간 전사), 검색 API 3종, Open-Meteo 날씨, RAG 메모리 저장 정책
 - **오디오 하드웨어 재설계**: Pi용 소형 마이크·스피커 → eMeet 스피커폰 + WebRTC AEC
+- **실시간 음성 확장**: GPT Realtime 모듈 추가, 엔진·목소리 음성 전환, 함수 호출로 에어컨·조명·알람 제어
+- **Android 폰 브리지 (Kotlin)**: 기본 어시스턴트 등록, 기기 내 웨이크워드, 집 Wi-Fi 감지 시 일시정지, 토큰 인증 WebSocket 서버(`module_phone_bridge.py`)
+- **알람 데몬**: 표준 라이브러리만으로 HTTP API·상태 저장·놓친 알람 처리, systemd 상주
 
 ## 6. 트러블슈팅
 | 문제 | 원인 | 해결 | 결과 |
@@ -78,7 +90,7 @@ flowchart LR
 ## 7. 성과
 - 커밋 98개, 개발 기간 약 1년 7개월(2025-04 ~ 진행 중)
 - 상시 가동 홈서버에서 `tars.service`로 운영 (자동 재시작, USB 오디오 재열거 자동 복구)
-- TODO(사용자 확인): 응답 지연 등 정량 수치
+<!-- TODO(사용자 확인): 응답 지연 등 정량 수치 -->
 
 ## 8. 실행 방법
 ```bash
@@ -100,6 +112,8 @@ TARS-AI/
 │   ├── character/             # TARS, TARS_KO 페르소나
 │   ├── engine/                # 의도 분류 모델 학습·추론
 │   └── www/                   # Chat UI
+├── phone-app/                 # Android 폰 브리지 앱 (Kotlin)
+├── alarm-daemon/              # 알람 상주 서비스 + systemd 유닛
 ├── 3d Printer Files/, Step Files/   # 원작 기구 설계
 ├── docs/
 │   ├── TROUBLESHOOTING.md
@@ -110,4 +124,4 @@ TARS-AI/
 
 ## 10. 회고
 - 잘한 점: 소프트웨어 문제로 보이던 증상(오디오·디스플레이)을 패키지 내부·전원·기구까지 추적해 근본 원인 분리
-- 아쉬운 점: 초기 부품 선정 시 오디오 품질·전류 요구량 검토 부족 → v2 BoM에서 오디오 재설계. 다음은 폰 브리지·알람 데몬 정리 후 공개
+- 아쉬운 점: 초기 부품 선정 시 오디오 품질·전류 요구량 검토 부족 → v2 BoM에서 오디오 재설계. 다음 목표는 eMeet 기반 full-duplex(말 끊고 끼어들기) 검증

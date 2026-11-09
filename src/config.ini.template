@@ -11,6 +11,8 @@ mode = traditional
 # traditional = existing wake word -> STT -> LLM/tools -> TTS pipeline
 # gemini_live = wake word -> Gemini Live native audio session
 
+live_provider = gemini
+# Live engine at startup: gemini or openai. Saying "GPT로 바꿔줘" switches it and is remembered.
 [GEMINI_LIVE]
 model = gemini-3.1-flash-live-preview
 voice_name = Kore
@@ -50,6 +52,32 @@ echo_tail_ms = 600
 session_timeout_seconds = 540
 # Session safety limit only. Per-utterance silence/listen timing remains Gemini automatic VAD.
 # 540s stays below the documented approximate 10-minute connection lifetime.
+idle_timeout_seconds = 25
+# End the Live session after this many seconds with no speech from either side. 0 = disabled.
+
+[OPENAI_REALTIME]
+model = gpt-realtime-2.1
+voice = cedar
+# alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar. Changeable by voice command.
+speed = 1.15
+# Speaking speed, 0.25-1.5 (1.0 = normal).
+speaking_style = Speak fast, upbeat and a little playful, like a close friend teasing lightly. Keep it casual, never stiff or formal.
+# Extra delivery instruction appended to the system prompt for GPT only.
+transcription_model = gpt-4o-mini-transcribe
+# Key goes in .env as OPENAI_REALTIME_API_KEY (OPENAI_API_KEY is used by the LLM backend).
+
+[PHONE_BRIDGE]
+enabled = True
+host = 127.0.0.1
+# Set to this machine's Tailscale IP (100.x.y.z) so only tailnet devices (the phone) can reach it.
+port = 8790
+# The shared secret is PHONE_BRIDGE_TOKEN in .env; the phone app is built with it.
+
+[ALARM]
+enabled = True
+# Exposes set/list/cancel/stop alarm tools in Gemini Live; the wake word also silences a ringing alarm.
+url = http://127.0.0.1:8765
+# tars-alarm daemon (~/tars-alarm, systemd user unit tars-alarm.service).
 
 [STT] # Speech-to-Text configuration
 input_device =

@@ -22,6 +22,7 @@ from modules.module_btcontroller import start_controls
 from modules.module_discord import *
 from modules.module_llm import process_completion
 from modules.module_tts import play_audio_chunks, play_audio_file, strip_elevenlabs_tags, normalize_for_korean_tts
+from modules.module_alarm import dismiss_ringing
 from modules.module_homeassistant import map_prompt_to_ha_service, send_prompt_to_homeassistant
 from modules.module_messageQue import queue_message
 
@@ -234,6 +235,23 @@ def gemini_live_session_callback():
 
     from modules.module_gemini_live import run_gemini_live_session
 
+    # Saying the wake word is how a ringing alarm gets silenced; TARS then opens
+    # the conversation knowing which alarm the user just woke up to.
+    opening_prompt = None
+    if CONFIG.get('ALARM', {}).get('enabled'):
+        dismissed = dismiss_ringing(timeout=1.0).get('dismissed')
+        if dismissed:
+            queue_message(f"INFO: Wake word silenced {len(dismissed)} ringing alarm(s).")
+            details = "; ".join(
+                f"{alarm['time']} {alarm.get('label', '')} {alarm.get('message', '')}".strip()
+                for alarm in dismissed
+            )
+            opening_prompt = (
+                f"(System: the user just silenced a ringing alarm [{details}] by calling you. "
+                "Greet them in one or two short Korean sentences fitting that alarm. "
+                "If they want more sleep, offer to set another alarm.)"
+            )
+
     stt_manager._release_audio_input(pause=0.05)
     try:
         input_device = stt_manager._get_input_device()
@@ -241,16 +259,47 @@ def gemini_live_session_callback():
         queue_message(f"WARNING: Gemini Live will use the default microphone: {exc}")
         input_device = None
 
-    run_gemini_live_session(
-        config=CONFIG,
-        character_manager=character_manager,
-        memory_manager=memory_manager,
-        input_device=input_device,
-        traditional_delegate=_gemini_live_traditional_delegate,
-        homeassistant_delegate=_gemini_live_homeassistant_delegate,
-        turn_callback=_remember_gemini_live_turn,
+    run_live_conversation(
         shutdown_event=stt_manager.shutdown_event,
+        opening_prompt=opening_prompt,
+        input_device=input_device,
     )
+
+
+def start_phone_bridge(shutdown_event):
+    """Serve the TARS phone app; each connection runs its own Live conversation."""
+    from modules.module_phone_bridge import start_phone_bridge as serve_phone
+
+    serve_phone(
+        lambda stop_event, audio_io: run_live_conversation(
+            shutdown_event=stop_event, audio_io=audio_io
+        ),
+        shutdown_event,
+    )
+
+
+def run_live_conversation(shutdown_event, opening_prompt=None, input_device=None, audio_io=None):
+    """Run Live sessions until no voice/engine change asks for a reconnect."""
+    from modules.module_gemini_live import run_gemini_live_session
+
+    while True:
+        session = run_gemini_live_session(
+            config=CONFIG,
+            character_manager=character_manager,
+            memory_manager=memory_manager,
+            input_device=input_device,
+            traditional_delegate=_gemini_live_traditional_delegate,
+            homeassistant_delegate=_gemini_live_homeassistant_delegate,
+            turn_callback=_remember_gemini_live_turn,
+            shutdown_event=shutdown_event,
+            opening_prompt=opening_prompt,
+            audio_io=audio_io,
+        )
+        if not session.restart_prompt or shutdown_event.is_set():
+            break
+        opening_prompt = session.restart_prompt
+        if audio_io:
+            audio_io.event({"type": "state", "state": "reconnecting"})
 
 # === Initialization ===
 def initialize_managers(mem_manager, char_manager, stt_mgr):

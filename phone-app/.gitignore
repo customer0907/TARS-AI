@@ -1,0 +1,12 @@
+local.properties
+tars.properties
+.gradle/
+.kotlin/
+build/
+app/build/
+*.apk
+# Vosk Korean model (~250MB) and generated file list: download separately (see README)
+app/src/main/assets/vosk-ko/
+app/src/main/assets/vosk-ko.files
+# Wake-word self-test recordings (debug build only)
+app/src/debug/assets/

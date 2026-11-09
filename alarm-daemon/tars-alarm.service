@@ -1,0 +1,22 @@
+[Unit]
+Description=TARS alarm daemon (desktop speaker alarms)
+After=pulseaudio.service sound.target
+Wants=pulseaudio.service
+
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# GEMINI_API_KEY for spoken alarms is read from the TARS .env at synthesis time.
+Environment=TARS_ALARM_ENV_FILE=%h/TARS-AI/.env
+ExecStart=/usr/bin/python3 -u %h/tars-alarm/tars_alarm.py serve
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tars-alarm
+
+[Install]
+WantedBy=default.target

@@ -180,6 +180,27 @@ def load_config():
         "BASE_DIR": base_dir,
         "VOICE_PIPELINE": {
             "mode": voice_pipeline_mode,
+            "live_provider": config.get(
+                'VOICE_PIPELINE', 'live_provider', fallback='gemini'
+            ).strip().lower(),
+        },
+        "PHONE_BRIDGE": {
+            "enabled": config.getboolean('PHONE_BRIDGE', 'enabled', fallback=True),
+            "host": config.get('PHONE_BRIDGE', 'host', fallback='127.0.0.1').strip(),
+            "port": config.getint('PHONE_BRIDGE', 'port', fallback=8790),
+            "token": os.getenv('PHONE_BRIDGE_TOKEN'),
+        },
+        "OPENAI_REALTIME": {
+            "api_key": os.getenv('OPENAI_REALTIME_API_KEY'),
+            "model": config.get(
+                'OPENAI_REALTIME', 'model', fallback='gpt-realtime-2.1'
+            ).strip(),
+            "voice_name": config.get('OPENAI_REALTIME', 'voice', fallback='cedar').strip(),
+            "speed": min(1.5, max(0.25, config.getfloat('OPENAI_REALTIME', 'speed', fallback=1.0))),
+            "speaking_style": config.get('OPENAI_REALTIME', 'speaking_style', fallback='').strip(),
+            "transcription_model": config.get(
+                'OPENAI_REALTIME', 'transcription_model', fallback='gpt-4o-mini-transcribe'
+            ).strip(),
         },
         "GEMINI_LIVE": {
             "api_key": os.getenv('GEMINI_API_KEY'),
@@ -251,6 +272,16 @@ def load_config():
                     'GEMINI_LIVE', 'session_timeout_seconds', fallback=540
                 ),
             ),
+            "idle_timeout_seconds": max(
+                0,
+                config.getint(
+                    'GEMINI_LIVE', 'idle_timeout_seconds', fallback=25
+                ),
+            ),
+        },
+        "ALARM": {
+            "enabled": config.getboolean('ALARM', 'enabled', fallback=True),
+            "url": config.get('ALARM', 'url', fallback='http://127.0.0.1:8765').strip(),
         },
         "CONTROLS": {
             "controller_name": config['CONTROLS']['controller_name'],
@@ -349,6 +380,7 @@ def load_config():
             "enabled": config['HOME_ASSISTANT']['enabled'],
             "url": config['HOME_ASSISTANT']['url'],
             "ha_skip_llm": config.get('HOME_ASSISTANT', 'ha_skip_llm', fallback='true'),
+            "climate_entity": config.get('HOME_ASSISTANT', 'climate_entity', fallback='').strip(),
             "HA_TOKEN": os.getenv('HA_TOKEN'),
         },
         "MQTT": {  

@@ -1,0 +1,7 @@
+# Copy to tars.properties (git-ignored). Values are baked into BuildConfig at build time.
+# WebSocket URL of the TARS phone bridge (module_phone_bridge.py), reachable over Tailscale.
+tars.url=ws://100.x.y.z:8790
+# Must match PHONE_BRIDGE_TOKEN in the TARS .env
+tars.token=change-me
+# Home Wi-Fi SSID prefix: at home the desktop TARS answers, so the phone pauses its wake word.
+tars.home_prefix=MyHomeWiFi

@@ -36,6 +36,7 @@ from modules.module_main import (
     process_discord_message_callback,
     start_bt_controller_thread,
     start_discord_bot,
+    start_phone_bridge,
     utterance_callback,
     wake_word_callback,
 )
@@ -111,6 +112,15 @@ if __name__ == "__main__":
             daemon=True,
         )
         mqtt_thread.start()
+
+    # TARS phone app (Android assistant) over Tailscale
+    if CONFIG['PHONE_BRIDGE']['enabled']:
+        threading.Thread(
+            target=start_phone_bridge,
+            args=(shutdown_event,),
+            name="PhoneBridgeThread",
+            daemon=True,
+        ).start()
 
     # Start necessary threads
     if CONFIG['CONTROLS']['enabled'] == 'True':

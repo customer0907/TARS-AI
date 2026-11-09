@@ -155,6 +155,126 @@ def map_prompt_to_ha_service(prompt: str):
     return None
 
 
+# --- Air conditioner (climate entity) ----------------------------------------
+
+def _ha_request(method: str, path: str, payload: dict | None = None):
+    url = f"{config['HOME_ASSISTANT']['url']}{path}"
+    response = requests.request(method, url, headers=HEADERS, json=payload, timeout=15)
+    if not response.ok:
+        raise Exception(f"Home Assistant {response.status_code}: {response.text[:200]}")
+    return response.json()
+
+
+def _resolve_climate(entity_id: str | None = None) -> dict:
+    """Return the climate entity state to act on, or {"error": ...}."""
+    entity_id = (entity_id or config['HOME_ASSISTANT'].get('climate_entity') or "").strip()
+    if entity_id:
+        return _ha_request("GET", f"/api/states/{entity_id}")
+    climates = [
+        state for state in _ha_request("GET", "/api/states")
+        if state["entity_id"].startswith("climate.")
+    ]
+    if not climates:
+        return {"error": "No air conditioner is registered in Home Assistant."}
+    if len(climates) > 1:
+        return {
+            "error": "Several air conditioners exist; pass entity_id.",
+            "choices": [
+                {"entity_id": s["entity_id"], "name": s["attributes"].get("friendly_name")}
+                for s in climates
+            ],
+        }
+    return climates[0]
+
+
+def _climate_summary(state: dict) -> dict:
+    attrs = state.get("attributes", {})
+    return {
+        "entity_id": state["entity_id"],
+        "name": attrs.get("friendly_name"),
+        "state": state.get("state"),
+        "target_temperature": attrs.get("temperature"),
+        "current_temperature": attrs.get("current_temperature"),
+        "fan_mode": attrs.get("fan_mode"),
+        "available_modes": attrs.get("hvac_modes"),
+        "available_fan_modes": attrs.get("fan_modes"),
+        "min_temperature": attrs.get("min_temp"),
+        "max_temperature": attrs.get("max_temp"),
+    }
+
+
+def get_climate_state(entity_id: str | None = None) -> dict:
+    state = _resolve_climate(entity_id)
+    return state if "error" in state else _climate_summary(state)
+
+
+def control_climate(power=None, temperature=None, mode=None, fan_mode=None, entity_id=None) -> dict:
+    """Apply the given air conditioner settings; omitted settings are left alone."""
+    state = _resolve_climate(entity_id)
+    if "error" in state:
+        return state
+    attrs = state.get("attributes", {})
+    target = {"entity_id": state["entity_id"]}
+
+    power = str(power).lower() if power else None
+    mode = str(mode).lower() if mode else None
+    if power not in (None, "on", "off"):
+        return {"error": "power must be on or off."}
+    if mode and mode not in (attrs.get("hvac_modes") or []):
+        return {"error": f"Unsupported mode {mode}.", "available_modes": attrs.get("hvac_modes")}
+    if fan_mode and fan_mode not in (attrs.get("fan_modes") or []):
+        return {
+            "error": f"Unsupported fan mode {fan_mode}.",
+            "available_fan_modes": attrs.get("fan_modes"),
+        }
+    if temperature is not None:
+        temperature = float(temperature)
+        low, high = attrs.get("min_temp"), attrs.get("max_temp")
+        if (low is not None and temperature < low) or (high is not None and temperature > high):
+            return {"error": f"Temperature must be between {low} and {high}."}
+
+    done = []
+    if power == "off":
+        _ha_request("POST", "/api/services/climate/turn_off", target)
+        done.append("turned off")
+    else:
+        wants_setting = mode or fan_mode or temperature is not None
+        # Asking for a temperature or fan speed on a stopped unit implies starting it.
+        if not mode and (power == "on" or (wants_setting and state.get("state") == "off")):
+            _ha_request("POST", "/api/services/climate/turn_on", target)
+            done.append("turned on")
+        if mode:
+            _ha_request("POST", "/api/services/climate/set_hvac_mode", {**target, "hvac_mode": mode})
+            done.append(f"mode {mode}")
+        if temperature is not None:
+            _ha_request(
+                "POST", "/api/services/climate/set_temperature", {**target, "temperature": temperature}
+            )
+            done.append(f"temperature {temperature:g}")
+        if fan_mode:
+            _ha_request("POST", "/api/services/climate/set_fan_mode", {**target, "fan_mode": fan_mode})
+            done.append(f"fan {fan_mode}")
+    if not done:
+        return {"error": "Nothing to change; give power, temperature, mode or fan_mode."}
+
+    queue_message(f"Air conditioner: {', '.join(done)}")
+    return {"applied": done, "name": attrs.get("friendly_name"), "entity_id": state["entity_id"]}
+
+
+def control_light(power: str) -> dict:
+    """Turn the TARS-controlled room light on or off."""
+    power = str(power or "").lower()
+    if power not in ("on", "off"):
+        return {"error": "power must be on or off."}
+    _ha_request(
+        "POST",
+        f"/api/services/input_boolean/turn_{power}",
+        {"entity_id": "input_boolean.tars_light"},
+    )
+    queue_message(f"Light turned {power}.")
+    return {"applied": f"light {power}"}
+
+
 def send_prompt_to_homeassistant(prompt):
     print("homeassistant func starts.")
     queue_message(f"sending prompt {prompt}")
@@ -183,8 +303,13 @@ def send_prompt_to_homeassistant(prompt):
     response = requests.post(url, json=data, headers=HEADERS)
     if response.ok:
         resp_json = response.json()
-        speech = resp_json.get("speech") or resp_json.get("response", {}).get("speech", "")
-        queue_message(speech)
-        return resp_json
+        # HA nests the reply as response.speech.plain.speech.
+        speech = resp_json.get("response", {}).get("speech", {})
+        if isinstance(speech, dict):
+            speech = speech.get("plain", {}).get("speech", "")
+        speech = str(speech or "").strip()
+        if speech:
+            queue_message(f"HA: {speech}")
+        return {"home_assistant_reply": speech or "No reply from Home Assistant."}
     else:
         raise Exception(f"Failed to send prompt: {response.status_code}, {response.text}")

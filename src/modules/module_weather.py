@@ -127,6 +127,42 @@ def _format_weekly(data, location_name):
     return "\n".join(lines)
 
 
+def weather_report(days=1):
+    """Structured current conditions plus a daily forecast (today first) for tools."""
+    cfg = _cfg()
+    days = min(max(int(days or 1), 1), 7)
+    queue_message(f"INFO: Open-Meteo weather ({cfg['location_name']}, {days} day)")
+    try:
+        data = _fetch_open_meteo(forecast_days=days)
+    except requests.RequestException as e:
+        queue_message(f"ERROR: Weather API failed: {e}")
+        return {"error": f"Weather service unreachable: {e}"}
+    cur = data.get("current", {})
+    daily = data.get("daily", {})
+    forecast = []
+    for i, day in enumerate(daily.get("time", [])[:days]):
+        def at(key):
+            values = daily.get(key, [])
+            return values[i] if i < len(values) else None
+        forecast.append({
+            "date": day,
+            "sky": _wmo_label(at("weather_code")),
+            "low_c": at("temperature_2m_min"),
+            "high_c": at("temperature_2m_max"),
+            "rain_chance_percent": at("precipitation_probability_max"),
+        })
+    return {
+        "location": cfg["location_name"],
+        "now": {
+            "sky": _wmo_label(cur.get("weather_code")),
+            "temperature_c": cur.get("temperature_2m"),
+            "humidity_percent": cur.get("relative_humidity_2m"),
+            "wind_kmh": cur.get("wind_speed_10m"),
+        },
+        "daily": forecast,
+    }
+
+
 def get_weather(user_input=""):
     """
     Fetch weather for the configured location. Returns a short Korean summary

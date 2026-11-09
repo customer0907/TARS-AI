@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import threading
@@ -12,6 +13,23 @@ message_queue = queue.Queue()
 output_lock = threading.Lock()  # 🔹 Single lock for ALL stdout operations
 
 _TIMESTAMP_PREFIX = re.compile(r'^\[\d{2}:\d{2}:\d{2}\] ')
+
+# Console lines are also kept on disk so conversations can be reviewed later.
+CONSOLE_LOG = os.path.join(os.path.dirname(__file__), "..", "logs", "console.log")
+CONSOLE_LOG_MAX_BYTES = 20 * 1024 * 1024
+_log_lock = threading.Lock()
+
+
+def _append_console_log(text: str) -> None:
+    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {_TIMESTAMP_PREFIX.sub('', text)}\n"
+    try:
+        with _log_lock:
+            if os.path.exists(CONSOLE_LOG) and os.path.getsize(CONSOLE_LOG) > CONSOLE_LOG_MAX_BYTES:
+                os.replace(CONSOLE_LOG, CONSOLE_LOG + ".1")
+            with open(CONSOLE_LOG, "a", encoding="utf-8") as handle:
+                handle.write(line)
+    except OSError:
+        pass
 
 
 def _char_width(char: str) -> int:
@@ -183,12 +201,15 @@ def queue_message(message, stream=False):
                                Defaults to False if not provided.
     """
     if message and message.strip():
+        _append_console_log(message.strip())
         message_queue.put((format_console_line(message.strip()), stream))  # 🔹 No lock needed here
 
 
 def queue_live_update(key, message, final=False):
     """Replace one console line as a partial transcript grows."""
     if message and message.strip():
+        if final:
+            _append_console_log(message.strip())
         message_queue.put(("__live_update__", key, message.strip(), final))
 
 def stop_message_processing():
